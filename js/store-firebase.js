@@ -1,9 +1,10 @@
 // Datos reales en Firebase (Auth + Firestore). Misma interfaz que store-demo.js.
-import { FIREBASE_CONFIG, EMAIL_DOMAIN } from './config.js';
+import { FIREBASE_CONFIG, EMAIL_DOMAIN, URL_CLAVES } from './config.js';
 import { bucketDe, padronAString, padronDeString, palabrasDe } from './roles.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
-  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged,
+  EmailAuthProvider, reauthenticateWithCredential, updatePassword
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore,
@@ -100,6 +101,25 @@ export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padr
   });
   if (reactivado) await deleteDoc(D('bajas', dni));
   return { uid, reactivado };
+}
+
+// ----- contraseñas
+export async function cambiarClave(actual, nueva) {
+  const u = auth.currentUser;
+  await reauthenticateWithCredential(u, EmailAuthProvider.credential(u.email, actual));
+  await updatePassword(u, nueva);
+}
+export const puedeBlanquear = !!URL_CLAVES;
+// Un superior le genera una contraseña nueva a alguien de su equipo (lo hace la función del servidor)
+export async function blanquearClave(uid) {
+  const token = await auth.currentUser.getIdToken();
+  let r;
+  try {
+    r = await fetch(URL_CLAVES, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ uid }) });
+  } catch { throw Object.assign(new Error('No hay conexión. Probá de nuevo cuando tengas señal.'), { code: 'network' }); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.pass) throw Object.assign(new Error(j.error || 'No se pudo blanquear la contraseña.'), { code: 'blanqueo' });
+  return j.pass;
 }
 
 // Quitar a alguien del equipo: su gente pasa a otro (o se borra) y pierde el acceso

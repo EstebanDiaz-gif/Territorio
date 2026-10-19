@@ -65,6 +65,21 @@ export function watchUsuarios(cb) {
   return () => subs.delete(f);
 }
 
+export async function cambiarClave(actual, nueva) {
+  await espera();
+  if (db.claves[me.uid] !== actual) throw err('auth/invalid-credential', 'La contraseña actual no es correcta');
+  db.claves[me.uid] = nueva; guardar();
+}
+export const puedeBlanquear = true;
+export async function blanquearClave(uid) {
+  await espera();
+  const u = db.usuarios[uid];
+  if (!u || uid === me.uid || !(me.rol === 'cabeza' || (u.path || []).includes(me.uid))) throw err('permission-denied', 'No podés blanquear a esa persona');
+  const pass = String(Math.floor(100000 + Math.random() * 900000));
+  db.claves[uid] = pass; guardar();
+  return pass;
+}
+
 export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre }) {
   const sup = padre || me;
   await espera();

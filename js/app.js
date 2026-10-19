@@ -163,6 +163,7 @@ const I = {
   candado: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   ok: '<path d="M5 12.5l4.5 4.5L19 7"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  llave: '<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2.5 2.5M14 9l2 2"/>',
   alerta: '<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4.5M12 17.5v.3"/>',
   mas: '<path d="M12 5v14M5 12h14"/>',
   subir: '<path d="M12 15V3M7 8l5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
@@ -791,6 +792,7 @@ function hojaQuitarUsuario(uid) {
       <div class="grow"><h2>${esc(u.nombre)}</h2><div class="muted num">${ROL_LABEL[u.rol]} · DNI ${fmtDni(u.dni)}</div></div>
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
     ${rolAbajo(u.rol) ? `<button class="btn btn-full" data-act="nuevo-usuario" data-rol="${rolAbajo(u.rol)}" data-padre="${u.uid}">${ic('mas')} Agregar ${ROL_CORTO[rolAbajo(u.rol)].toLowerCase()} a su equipo</button>` : ''}
+    ${S.puedeBlanquear ? `<button class="btn btn-sec btn-full" data-act="blanquear" data-uid="${u.uid}">${ic('llave', 18)} Se olvidó la contraseña: blanquear</button>` : ''}
     ${debajo.length ? `<div class="aviso warn">${ic('alerta', 18)}<span>Tiene ${debajo.length} ${debajo.length === 1 ? 'persona' : 'personas'} en su equipo. Para quitarlo, primero quitá a los que tiene debajo.</span></div>` : `
     <div class="card pad stack">
       <h3>Quitar del equipo</h3>
@@ -1457,6 +1459,7 @@ function hojaFiscal(id) {
     ${(f.incidencias || []).length ? `<div class="card pad stack" style="gap:6px"><h3>Incidencias</h3>${[...f.incidencias].reverse().map((i) => `<div class="inc"><span class="muted small num">${hora(i.at)}</span> ${esc(i.texto)}</div>`).join('')}</div>` : ''}
     ${f.acta ? `<div class="card pad stack"><h3>Acta · enviada ${hora(f.actaAt)}</h3>${resumenActaHtml(f.acta, st.me.listas)}
       ${f.tieneFoto ? `<button class="btn btn-sec" data-act="fiscal-ver-acta" data-id="${f.id}">Ver foto del acta</button>` : '<div class="muted small">No subió foto.</div>'}<div id="acta-img"></div></div>` : ''}
+    ${usuarioPorId(f.id) && S.puedeBlanquear ? `<button class="btn btn-sec" data-act="blanquear" data-uid="${f.id}">${ic('llave', 18)} Se olvidó la contraseña: blanquear</button>` : ''}
     ${usuarioPorId(f.id) ? `<button class="btn btn-ghost" data-act="fiscal-quitar" data-id="${f.id}">Quitarle el acceso</button>` : ''}`, { tipo: 'fiscal' });
 }
 
@@ -1504,8 +1507,73 @@ function hojaCuenta() {
       <div class="grow"><h2>${esc(me.nombre)}</h2><div class="muted">${ROL_LABEL[me.rol]}${me.circuito ? ' · Circuito ' + esc(me.circuito) : ''}</div></div>
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
     <div class="card pad small stack"><div>Campaña: <b>${esc(me.campania)}</b></div><div class="num">DNI: <b>${fmtDni(me.dni)}</b></div></div>
+    <button class="btn btn-sec btn-full" data-act="mi-clave">${ic('llave', 18)} Cambiar mi contraseña</button>
     <button class="btn btn-sec btn-full" data-act="salir">${DEMO ? 'Cambiar de rol' : 'Cerrar sesión'}</button>
     ${DEMO ? '<button class="btn btn-ghost" data-act="demo-reset">Volver los datos de prueba al inicio</button>' : ''}`, { tipo: 'cuenta' });
+}
+
+function hojaMiClave() {
+  abrirHoja(`
+    <div class="row"><h2 class="grow">Cambiar mi contraseña</h2><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    <form id="f-clave" class="stack" autocomplete="off">
+      <div><label class="label" for="cl-actual">Contraseña actual</label><input id="cl-actual" class="input" type="password" autocomplete="current-password" required></div>
+      <div><label class="label" for="cl-nueva">Contraseña nueva</label><input id="cl-nueva" class="input" type="password" autocomplete="new-password" minlength="6" required>
+        <div class="muted small">Al menos 6 caracteres. Que no sea tu DNI.</div></div>
+      <div><label class="label" for="cl-rep">Repetí la nueva</label><input id="cl-rep" class="input" type="password" autocomplete="new-password" required></div>
+      <div class="error" id="cl-err" role="alert"></div>
+      <button class="btn btn-full" type="submit">Guardar contraseña</button>
+    </form>`, { tipo: 'cuenta' });
+  $('#cl-actual').focus();
+}
+
+async function guardarMiClave(form) {
+  const actual = $('#cl-actual').value; const nueva = $('#cl-nueva').value; const rep = $('#cl-rep').value;
+  const err = $('#cl-err');
+  if (nueva.length < 6) { err.textContent = 'La contraseña nueva tiene que tener al menos 6 caracteres.'; return; }
+  if (normDni(nueva) === st.me.dni) { err.textContent = 'No uses tu DNI como contraseña.'; return; }
+  if (nueva !== rep) { err.textContent = 'Las dos contraseñas nuevas no son iguales.'; return; }
+  if (nueva === actual) { err.textContent = 'La nueva tiene que ser distinta de la actual.'; return; }
+  const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Guardando…';
+  try {
+    await S.cambiarClave(actual, nueva);
+    cerrarHoja(); toast('Listo, ya tenés tu contraseña nueva');
+  } catch (e) {
+    err.textContent = /invalid-credential|wrong-password/.test(e?.code || '') ? 'La contraseña actual no es correcta.' : mensajeError(e);
+    btn.disabled = false; btn.textContent = 'Guardar contraseña';
+  }
+}
+
+// Blanqueo: un superior le genera una contraseña nueva a alguien de su equipo que se la olvidó
+function hojaBlanquear(uid) {
+  const u = usuarioPorId(uid);
+  if (!u) return;
+  abrirHoja(`
+    <div class="row"><h2 class="grow">Blanquear contraseña</h2><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    <div>Se le genera a <b>${esc(u.nombre)}</b> una contraseña nueva para que vuelva a entrar. La anterior deja de funcionar y se cierra su sesión en otros celulares.</div>
+    <div class="muted small">Su gente y su equipo no cambian.</div>
+    <div class="error" id="bl-err" role="alert"></div>
+    <button class="btn btn-full" data-act="blanquear-si" data-uid="${u.uid}">${ic('llave', 18)} Generar contraseña nueva</button>
+    <button class="btn btn-ghost" data-act="cerrar">Cancelar</button>`, { tipo: 'usuario' });
+}
+
+async function blanquear(el) {
+  const u = usuarioPorId(el.dataset.uid);
+  el.disabled = true; el.textContent = 'Generando…';
+  try {
+    const pass = await S.blanquearClave(u.uid);
+    const link = location.origin + location.pathname;
+    const msg = `Hola ${primerNombre(u.nombre)}! Te blanqueamos la contraseña de ${APP_NAME}.\nEntrá en ${link}\nDNI: ${u.dni}\nContraseña nueva: ${pass}\nCuando entres, podés cambiarla en Mi cuenta → Cambiar mi contraseña.`;
+    const wa = waUrl(u.tel, msg);
+    hojaHtml(`
+      <div class="aviso ok">${ic('ok', 18)}<span>Listo. ${esc(primerNombre(u.nombre))} ya puede entrar con la contraseña nueva.</span></div>
+      <div class="card pad stack"><div class="muted small">Mandale este mensaje:</div><div style="white-space:pre-line">${esc(msg)}</div></div>
+      ${wa ? `<a class="btn btn-full" href="${wa}" target="_blank" rel="noopener">${ic('wa')} Enviar por WhatsApp</a>` : ''}
+      <button class="btn btn-sec" data-act="copiar" data-txt="${esc(msg)}">Copiar mensaje</button>
+      <button class="btn btn-ghost" data-act="cerrar">Listo</button>`);
+  } catch (e) {
+    $('#bl-err').textContent = mensajeError(e);
+    el.disabled = false; el.textContent = 'Generar contraseña nueva';
+  }
 }
 
 // ---------------------------------------------------------------- eventos
@@ -1515,6 +1583,9 @@ const acciones = {
   'ir-entrar': () => { st.login = 'entrar'; pintarLogin(); },
   tab: (el) => { st.tab = el.dataset.tab; cerrarHoja(); pintar(); if (st.tab === 'cargar') $('#c-dni')?.focus(); },
   cuenta: hojaCuenta,
+  'mi-clave': hojaMiClave,
+  blanquear: (el) => hojaBlanquear(el.dataset.uid),
+  'blanquear-si': blanquear,
   salir,
   'demo-reset': () => { S.reiniciarDemo(); cerrarHoja(); toast('Datos de prueba reiniciados'); },
   cerrar: cerrarHoja,
@@ -1693,6 +1764,7 @@ document.addEventListener('submit', async (e) => {
     } catch (x) { err.textContent = mensajeError(x); btn.disabled = false; }
   }
   if (f.id === 'f-usuario') crearUsuario(f);
+  if (f.id === 'f-clave') guardarMiClave(f);
 });
 
 let tBusqueda = null;

@@ -29,3 +29,7 @@ export const FIREBASE_CONFIG = {
 // Los usuarios entran con DNI + contraseña. Internamente Firebase necesita un email,
 // así que se arma como <dni>@<EMAIL_DOMAIN>. No hace falta que el dominio exista.
 export const EMAIL_DOMAIN = 'usuarios.territorio.app';
+
+// Blanqueo de contraseñas (plan pago de Firebase). Cuando subas la función de functions/blanquear-clave,
+// pegá acá su dirección (termina en .run.app). Mientras esté vacío, el botón "Blanquear contraseña" no aparece.
+export const URL_CLAVES = '';
