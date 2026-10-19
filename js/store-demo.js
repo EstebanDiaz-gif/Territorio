@@ -86,7 +86,7 @@ export async function blanquearClave(uid) {
   return pass;
 }
 
-export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre }) {
+export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre, domicilio }) {
   const sup = padre || me;
   await espera();
   if (Object.values(db.usuarios).some((u) => u.dni === dni)) throw err('auth/email-already-in-use', 'Ese DNI ya tiene usuario');
@@ -95,7 +95,7 @@ export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padr
   if (esCabeza ? me.rol !== 'cabeza' : (!nivelOk || me.rol === 'fiscal' || !(me.rol === 'cabeza' || sup.path.includes(me.uid)))) throw err('permission-denied', 'No podés crear ese rol');
   const uid = 'u' + Math.random().toString(36).slice(2, 9);
   db.usuarios[uid] = {
-    uid, dni, nombre, tel: tel || '', rol,
+    uid, dni, nombre, tel: tel || '', rol, domicilio: domicilio || '',
     parentId: esCabeza ? null : sup.uid,
     path: esCabeza ? [uid] : [...sup.path, uid],
     circuito: circuito || sup.circuito || '',

@@ -32,6 +32,8 @@ const primerNombre = (n) => {
   return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
 };
 const mapsUrl = (p) => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([p.dirEscuela, p.escuela, ZONA].filter(Boolean).join(', '));
+// Ir a buscar a alguien a su casa: abre el GPS con indicaciones hasta el domicilio
+const casaUrl = (dom) => (dom && String(dom).trim() ? 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent([String(dom).trim(), ZONA].join(', ')) : '');
 const waUrl = (tel, texto) => {
   const t = telWhatsApp(tel);
   return t ? `https://wa.me/${t}${texto ? '?text=' + encodeURIComponent(texto) : ''}` : '';
@@ -168,6 +170,7 @@ const I = {
   mas: '<path d="M12 5v14M5 12h14"/>',
   subir: '<path d="M12 15V3M7 8l5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
   bajar: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
+  casa: '<path d="M3.5 11.5L12 4l8.5 7.5"/><path d="M5.5 10v9.5h13V10"/><path d="M10 19.5v-5h4v5"/>',
   auto: '<path d="M3 16v-5l2-5h11l3 5h2v5h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/>',
   camara: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="4"/>',
   fiscal: '<path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
@@ -425,6 +428,7 @@ function tarjetaPersona(p) {
         <div class="tags">${tags.join('')}</div>
       </div>
     </button>
+    ${casaUrl(p.domicilio) ? `<a class="icon-btn" href="${casaUrl(p.domicilio)}" target="_blank" rel="noopener" aria-label="Ir a la casa de ${esc(p.nombre)}">${ic('casa')}</a>` : ''}
     ${wa ? `<a class="icon-btn wa" href="${wa}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(p.nombre)}">${ic('wa')}</a>` : ''}
   </div>`;
 }
@@ -467,10 +471,15 @@ function hojaPersona(dni, confirmarBorrado = false) {
         <div class="full"><dt>Escuela</dt><dd>${esc(p.escuela || 'Sin dato')}</dd>${p.dirEscuela ? `<div class="muted">${esc(p.dirEscuela)}</div>` : ''}</div>
         <div><dt>Mesa</dt><dd class="big">${esc(p.mesa || '–')}</dd></div>
         <div><dt>Orden</dt><dd class="big">${esc(p.orden || '–')}</dd></div>
-        <div><dt>Circuito</dt><dd>${esc(p.circuito || '–')}</dd></div>
-        <div><dt>Domicilio</dt><dd>${esc(p.domicilio || '–')}</dd></div>
+        <div class="full"><dt>Circuito</dt><dd>${esc(p.circuito || '–')}</dd></div>
       </dl>
-      ${p.escuela ? `<a class="btn btn-sec btn-sm" href="${mapsUrl(p)}" target="_blank" rel="noopener">${ic('mapa', 18)} Cómo llegar</a>` : ''}
+      ${p.escuela ? `<a class="btn btn-sec btn-sm" href="${mapsUrl(p)}" target="_blank" rel="noopener">${ic('mapa', 18)} Cómo llegar a la escuela</a>` : ''}
+    </div>
+    <div class="card pad stack">
+      <div><label class="label" for="p-dom">Domicilio (para ir a buscarlo)</label>
+        <input id="p-dom" class="input" value="${esc(p.domicilio || '')}" placeholder="Calle y número, barrio" autocomplete="off">
+        <div class="muted small">Si se mudó o el del padrón está mal, corregilo acá.</div></div>
+      ${casaUrl(p.domicilio) ? `<a class="btn btn-full" id="p-ir-casa" href="${casaUrl(p.domicilio)}" target="_blank" rel="noopener">${ic('casa', 18)} Ir a su casa</a>` : ''}
     </div>
     <div><span class="label">Estado</span>
       <div class="chips wrap">${ESTADOS.map(([k, l]) => `<button type="button" class="chip est" data-act="p-estado" data-v="${k}" aria-pressed="${p.estado === k}">${l}</button>`).join('')}</div>
@@ -567,6 +576,9 @@ function resultadoCargar() {
     : `<div class="aviso warn">${ic('alerta', 18)}<span>No figura en el padrón cargado. Podés cargarla igual y queda marcada para revisar.</span></div>
        <div class="card pad"><label class="label" for="c-nombre">Nombre y apellido</label><input id="c-nombre" class="input" maxlength="80"></div>`}
     <div class="card pad stack">
+      <div><label class="label" for="c-dom">Domicilio (para ir a buscarlo)</label>
+        <input id="c-dom" class="input" value="${esc(pd?.domicilio || '')}" placeholder="Calle y número, barrio" autocomplete="off" maxlength="120">
+        ${pd?.domicilio ? '<div class="muted small">Viene del padrón. Si vive en otro lado, cambialo.</div>' : ''}</div>
       <div><label class="label" for="c-tel">Teléfono (WhatsApp)</label><input id="c-tel" class="input" inputmode="tel" placeholder="381…"></div>
       <div><span class="label">Estado</span>
         <div class="chips wrap">${ESTADOS.map(([k, l]) => `<button type="button" class="chip est" data-act="c-estado" data-v="${k}" aria-pressed="${c.estado === k}">${l}</button>`).join('')}</div>
@@ -615,7 +627,7 @@ async function guardarCarga() {
   const dueno = usuarioPorId($('#c-dueno')?.value) || st.me;
   const datos = {
     dni: c.dni, nombre,
-    domicilio: pd?.domicilio || '', circuito: pd?.circuito || unCircuito(dueno) || '', escuela: pd?.escuela || '',
+    domicilio: ($('#c-dom')?.value || '').trim().slice(0, 120) || pd?.domicilio || '', circuito: pd?.circuito || unCircuito(dueno) || '', escuela: pd?.escuela || '',
     dirEscuela: pd?.dirEscuela || '', mesa: pd?.mesa || '', orden: pd?.orden || '',
     tel: normDni($('#c-tel').value), estado: c.estado, tipo: $('#c-tipo').value,
     enPadron: !!pd, revisar: !pd, nota: pd ? '' : 'Revisar: no figura en el padrón'
@@ -656,6 +668,7 @@ function pintarDia() {
     ${traslados.length ? `<div class="card">
       <div class="escuela-h"><span style="color:var(--warn)">${ic('auto', 22)}</span><div class="grow"><h3>${traslados.length} ${traslados.length === 1 ? 'traslado pendiente' : 'traslados pendientes'}</h3><div class="muted small">Necesitan que los lleven a votar</div></div></div>
       ${traslados.slice(0, 8).map((p) => `<div class="votante"><div class="grow"><div style="font-weight:600">${esc(p.nombre)}</div><div class="muted small">${esc(p.domicilio || p.escuela || '')}</div></div>
+        ${casaUrl(p.domicilio) ? `<a class="icon-btn" href="${casaUrl(p.domicilio)}" target="_blank" rel="noopener" aria-label="Ir a la casa de ${esc(p.nombre)}">${ic('casa')}</a>` : ''}
         ${p.tel ? `<a class="icon-btn wa" href="${waUrl(p.tel, 'Hola ' + primerNombre(p.nombre) + '! Te pasamos a buscar para ir a votar. ¿A qué hora te queda bien?')}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(p.nombre)}">${ic('wa')}</a>` : ''}</div>`).join('')}
       ${traslados.length > 8 ? `<div class="votante muted small">y ${traslados.length - 8} más (filtrá por "Traslado" en Gente)</div>` : ''}
     </div>` : ''}
@@ -674,6 +687,7 @@ function pintarDia() {
         ${ps.map((p) => `<div class="votante">
           <div class="grow"><div style="font-weight:600">${esc(p.nombre)}</div>
           <div class="muted small num">Mesa ${esc(p.mesa || '–')} · orden ${esc(p.orden || '–')}${p.ownerId !== st.me.uid ? ' · de ' + esc(p.ownerNombre) : ''}</div></div>
+          ${!p.voto && casaUrl(p.domicilio) ? `<a class="icon-btn" href="${casaUrl(p.domicilio)}" target="_blank" rel="noopener" aria-label="Ir a la casa de ${esc(p.nombre)}">${ic('casa')}</a>` : ''}
           <button class="btn-voto ${p.voto ? 'si' : ''}" data-act="voto" data-dni="${p.dni}" aria-pressed="${!!p.voto}">${p.voto ? '✓ Votó' : 'Ya votó'}</button>
         </div>`).join('')}
       </div>`;
@@ -685,6 +699,7 @@ function htmlTraslados(traslados, total) {
   return `<div class="card">
       <div class="escuela-h"><span style="color:var(--warn)">${ic('auto', 22)}</span><div class="grow"><h3>${fmtN(total)} ${total === 1 ? 'traslado pendiente' : 'traslados pendientes'}</h3><div class="muted small">Necesitan que los lleven a votar</div></div></div>
       ${traslados.slice(0, 8).map((p) => `<div class="votante"><div class="grow"><div style="font-weight:600">${esc(p.nombre)}</div><div class="muted small">${esc(p.domicilio || p.escuela || '')}</div></div>
+        ${casaUrl(p.domicilio) ? `<a class="icon-btn" href="${casaUrl(p.domicilio)}" target="_blank" rel="noopener" aria-label="Ir a la casa de ${esc(p.nombre)}">${ic('casa')}</a>` : ''}
         ${p.tel ? `<a class="icon-btn wa" href="${waUrl(p.tel, 'Hola ' + primerNombre(p.nombre) + '! Te pasamos a buscar para ir a votar. ¿A qué hora te queda bien?')}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(p.nombre)}">${ic('wa')}</a>` : ''}</div>`).join('')}
       ${total > 8 ? `<div class="votante muted small">y ${fmtN(total - 8)} más (filtrá por "Traslado" en Gente)</div>` : ''}
     </div>`;
@@ -803,6 +818,15 @@ function hojaQuitarUsuario(uid) {
       <div class="grow"><h2>${esc(u.nombre)}</h2><div class="muted num">${ROL_LABEL[u.rol]} · DNI ${fmtDni(u.dni)}</div></div>
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
     ${rolAbajo(u.rol) ? `<button class="btn btn-full" data-act="nuevo-usuario" data-rol="${rolAbajo(u.rol)}" data-padre="${u.uid}">${ic('mas')} Agregar ${ROL_CORTO[rolAbajo(u.rol)].toLowerCase()} a su equipo</button>` : ''}
+    <div class="card pad stack">
+      <div><label class="label" for="qu-dom">Domicilio</label>
+        <input id="qu-dom" class="input" maxlength="120" autocomplete="off" value="${esc(u.domicilio || '')}" placeholder="Calle y número, barrio"></div>
+      <div class="row">
+        <button class="btn btn-sec grow" data-act="eq-dom" data-uid="${u.uid}">Guardar domicilio</button>
+        ${casaUrl(u.domicilio) ? `<a class="btn grow" href="${casaUrl(u.domicilio)}" target="_blank" rel="noopener">${ic('casa', 18)} Ir a su casa</a>` : ''}
+      </div>
+      <div class="error" id="qu-dom-err" role="alert"></div>
+    </div>
     ${u.rol !== 'cabeza' ? `<div class="card pad stack">
       <div><label class="label" for="qu-circ">Circuitos a cargo</label>
         <input id="qu-circ" class="input" inputmode="text" autocomplete="off" value="${esc(circuitosDe(u).join(', '))}" placeholder="Ej: 19, 20">
@@ -834,6 +858,7 @@ function hojaNuevoUsuario(rol, padreUid) {
       <div><label class="label" for="nu-nom">Nombre y apellido</label><input id="nu-nom" class="input" required maxlength="60"></div>
       <div><label class="label" for="nu-dni">DNI (con esto entra a la app)</label><input id="nu-dni" class="input" inputmode="numeric" required></div>
       <div><label class="label" for="nu-tel">Teléfono</label><input id="nu-tel" class="input" inputmode="tel" placeholder="381…"></div>
+      <div><label class="label" for="nu-dom">Domicilio <span class="muted">(opcional)</span></label><input id="nu-dom" class="input" maxlength="120" autocomplete="off" placeholder="Calle y número, barrio"></div>
       ${rol === 'encargado' ? '<div><label class="label" for="nu-circ">Circuitos a cargo</label><input id="nu-circ" class="input" inputmode="text" autocomplete="off" required placeholder="Ej: 19 · si son varios: 19, 20, 21"><div class="muted small">Si maneja más de un circuito, separalos con coma.</div></div>' : ''}
       <div><label class="label" for="nu-pass">Contraseña inicial</label><input id="nu-pass" class="input num" value="${clave}" minlength="6" required></div>
       <div class="error" id="nu-err" role="alert"></div>
@@ -850,6 +875,7 @@ async function crearUsuario(form) {
   const tel = normDni($('#nu-tel').value);
   const pass = $('#nu-pass').value.trim();
   const circuito = circuitosDe($('#nu-circ')?.value || '').join(', ');
+  const domicilio = ($('#nu-dom')?.value || '').trim().slice(0, 120);
   const err = $('#nu-err');
   if (!dniValido(dni)) { err.textContent = 'El DNI tiene que tener 7 u 8 números.'; return; }
   const ya = st.usuarios.find((u) => u.dni === dni);
@@ -862,7 +888,7 @@ async function crearUsuario(form) {
   const btn = form.querySelector('button[type=submit]');
   btn.disabled = true; btn.textContent = 'Creando…';
   try {
-    const r = await S.crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre });
+    const r = await S.crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre, domicilio });
     const link = location.origin + location.pathname;
     const msg = `Hola ${primerNombre(nombre)}! Ya tenés acceso a ${APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? (circuitosDe(circuito).length > 1 ? ' de los ' : ' del ') + textoCircuitos(circuito).toLowerCase() : ''}.\nEntrá en ${link}\nDNI: ${dni}\nContraseña: ${r?.reactivado ? 'la misma que usabas antes' : pass}`;
     const wa = waUrl(tel, msg);
@@ -1050,7 +1076,7 @@ async function analizarImportacion(file, pre = 'imp') {
       const d = { ...v };
       if (pd) {
         delPadron++;
-        Object.assign(d, { nombre: pd.nombre || v.nombre, domicilio: pd.domicilio || v.domicilio, circuito: pd.circuito || v.circuito, escuela: pd.escuela || v.escuela, dirEscuela: pd.dirEscuela || v.dirEscuela, mesa: pd.mesa || v.mesa, orden: pd.orden || '', enPadron: true });
+        Object.assign(d, { nombre: pd.nombre || v.nombre, domicilio: v.domicilio || pd.domicilio, circuito: pd.circuito || v.circuito, escuela: pd.escuela || v.escuela, dirEscuela: pd.dirEscuela || v.dirEscuela, mesa: pd.mesa || v.mesa, orden: pd.orden || '', enPadron: true });
       } else { noPadron++; d.enPadron = false; }
       (cons.estado === 'libre' ? nuevas : cons.estado === 'propia' ? propias : ocupadas).push(d);
       const bar = $(`#${pre}-prog`); if (bar) bar.style.width = pct(++i, m.validas.length) + '%';
@@ -1641,6 +1667,15 @@ const acciones = {
   'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol, el.dataset.padre || null),
   'eq-toggle': (el) => { const id = el.dataset.uid; if (st.abiertos.has(id)) st.abiertos.delete(id); else st.abiertos.add(id); pintarEquipo(); },
   'eq-opciones': (el) => hojaQuitarUsuario(el.dataset.uid),
+  'eq-dom': async (el) => {
+    const u = usuarioPorId(el.dataset.uid);
+    const dom = $('#qu-dom').value.trim().slice(0, 120);
+    el.disabled = true; el.textContent = 'Guardando…';
+    try {
+      await S.actualizarUsuario(u.uid, { domicilio: dom });
+      u.domicilio = dom; toast('Domicilio guardado'); hojaQuitarUsuario(u.uid);
+    } catch (e) { $('#qu-dom-err').textContent = mensajeError(e); el.disabled = false; el.textContent = 'Guardar domicilio'; }
+  },
   'eq-circ': async (el) => {
     const u = usuarioPorId(el.dataset.uid);
     const nuevo = circuitosDe($('#qu-circ').value).join(', ');
@@ -1842,6 +1877,7 @@ document.addEventListener('change', async (e) => {
   if (sheetCtx?.tipo === 'persona') {
     const dni = sheetCtx.dni;
     if (id === 'p-tel') { await actualizarPersonaApp(dni, { tel: normDni(e.target.value) }); toast('Teléfono guardado'); }
+    if (id === 'p-dom') { await actualizarPersonaApp(dni, { domicilio: e.target.value.trim().slice(0, 120) }); toast('Domicilio guardado'); hojaPersona(dni); }
     if (id === 'p-nota') { await actualizarPersonaApp(dni, { nota: e.target.value.trim(), revisar: false }); toast('Nota guardada'); }
     if (id === 'p-tipo') { await actualizarPersonaApp(dni, { tipo: e.target.value }); }
   }

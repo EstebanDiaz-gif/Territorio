@@ -57,7 +57,7 @@ service cloud.firestore {
             && (esCabeza() || enMiEquipo(usuario(request.resource.data.parentId).path)))
         );
         allow update: if gestor() && (esCabeza() || (enMiEquipo(resource.data.path) && request.auth.uid != uid))
-          && soloCambia(['nombre', 'tel', 'activo', 'circuito']);
+          && soloCambia(['nombre', 'tel', 'activo', 'circuito', 'domicilio']);
         // Quitar a alguien: una cabeza, o un superior de esa persona
         allow delete: if gestor() && request.auth.uid != uid && (esCabeza() || enMiEquipo(resource.data.path));
       }
@@ -89,7 +89,7 @@ service cloud.firestore {
 
         allow update: if gestor() && (esCabeza() || enMiEquipo(resource.data.path)) && (
           // cambios comunes
-          soloCambia(['estado', 'tel', 'voto', 'votoAt', 'nota', 'tipo', 'revisar', 'actualizadoAt'])
+          soloCambia(['estado', 'tel', 'domicilio', 'voto', 'votoAt', 'nota', 'tipo', 'revisar', 'actualizadoAt'])
           // transferencia a otro dueño dentro de mi equipo (las cabezas, a cualquiera)
           || (soloCambia(['ownerId', 'ownerNombre', 'path', 'actualizadoAt'])
             && request.resource.data.path == usuario(request.resource.data.ownerId).path
