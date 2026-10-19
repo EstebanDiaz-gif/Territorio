@@ -50,7 +50,13 @@ service cloud.firestore {
         );
         allow update: if miembro() && (esCabeza() || (enMiEquipo(resource.data.path) && request.auth.uid != uid))
           && soloCambia(['nombre', 'tel', 'activo']);
-        allow delete: if esCabeza();
+        // Quitar a alguien: una cabeza, o un superior de esa persona
+        allow delete: if miembro() && request.auth.uid != uid && (esCabeza() || enMiEquipo(resource.data.path));
+      }
+
+      // Personas quitadas del equipo (para poder volver a sumarlas con el mismo DNI)
+      match /bajas/{dni} {
+        allow read, write: if miembro();
       }
 
       // ---------- Padrón (en baldes por los últimos 3 dígitos del DNI) ----------

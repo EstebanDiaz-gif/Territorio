@@ -80,7 +80,18 @@ export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito }) {
   };
   db.claves[uid] = pass;
   guardar();
-  return uid;
+  return { uid, reactivado: false };
+}
+
+export async function quitarUsuario(u, dnis, destino) {
+  for (const d of dnis) {
+    const p = db.personas[d];
+    if (!p) continue;
+    if (destino) Object.assign(p, { ownerId: destino.uid, ownerNombre: destino.nombre, path: destino.path });
+    else delete db.personas[d];
+  }
+  delete db.usuarios[u.uid];
+  guardar();
 }
 
 // ---------- Padrón ----------

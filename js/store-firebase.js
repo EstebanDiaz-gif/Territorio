@@ -74,10 +74,21 @@ let secundaria = null;
 export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito }) {
   secundaria ||= initializeApp(FIREBASE_CONFIG, 'secundaria');
   const sAuth = getAuth(secundaria);
-  const r = await createUserWithEmailAndPassword(sAuth, email(dni), pass);
-  const uid = r.user.uid;
-  await setDoc(doc(getFirestore(secundaria), 'cuentas', uid), { cid });
-  await signOut(sAuth);
+  let uid;
+  let reactivado = false;
+  try {
+    const r = await createUserWithEmailAndPassword(sAuth, email(dni), pass);
+    uid = r.user.uid;
+    await setDoc(doc(getFirestore(secundaria), 'cuentas', uid), { cid });
+    await signOut(sAuth);
+  } catch (e) {
+    // Si lo habían quitado antes de esta campaña, se lo vuelve a sumar con su cuenta de siempre
+    if (e.code !== 'auth/email-already-in-use') throw e;
+    const baja = await getDoc(D('bajas', dni));
+    if (!baja.exists()) throw e;
+    uid = baja.data().uid;
+    reactivado = true;
+  }
   const esCabeza = rol === 'cabeza';
   await setDoc(D('usuarios', uid), {
     uid, dni, nombre, tel: tel || '', rol,
@@ -86,7 +97,22 @@ export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito }) {
     circuito: circuito || me.circuito || '',
     creado: serverTimestamp()
   });
-  return uid;
+  if (reactivado) await deleteDoc(D('bajas', dni));
+  return { uid, reactivado };
+}
+
+// Quitar a alguien del equipo: su gente pasa a otro (o se borra) y pierde el acceso
+export async function quitarUsuario(u, dnis, destino) {
+  for (let i = 0; i < dnis.length; i += 400) {
+    const b = writeBatch(db);
+    for (const d of dnis.slice(i, i + 400)) {
+      if (destino) b.update(D('personas', d), { ownerId: destino.uid, ownerNombre: destino.nombre, path: destino.path, actualizadoAt: serverTimestamp() });
+      else b.delete(D('personas', d));
+    }
+    await b.commit();
+  }
+  await setDoc(D('bajas', u.dni), { uid: u.uid, nombre: u.nombre, at: serverTimestamp() });
+  await deleteDoc(D('usuarios', u.uid));
 }
 
 const deMiEquipo = (nombre, campo = 'path') =>

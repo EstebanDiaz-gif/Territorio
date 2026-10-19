@@ -71,6 +71,7 @@ const I = {
   subir: '<path d="M12 15V3M7 8l5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
   bajar: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
   auto: '<path d="M3 16v-5l2-5h11l3 5h2v5h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/>',
+  mas3: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   logo: '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V6l4-3 4 3v4M9.5 15l1.8 1.8 3.4-3.6"/>'
 };
 const ic = (n, s = 20, extra = '') => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${I[n]}</svg>`;
@@ -608,6 +609,7 @@ function pintarEquipo() {
           <span class="small num" style="display:block"><b>${n}</b> cargados · <b>${v}</b> votaron${n ? ` · ${pct(v, n)}%` : ''}</span></span>
       </button>
       ${wa && u.uid !== st.me.uid ? `<a class="icon-btn wa" href="${wa}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(u.nombre)}">${ic('wa')}</a>` : ''}
+      ${u.uid !== st.me.uid ? `<button type="button" class="icon-btn" data-act="eq-opciones" data-uid="${u.uid}" aria-label="Opciones de ${esc(u.nombre)}">${ic('mas3')}</button>` : ''}
     </div>`;
     if (!abierto) return html;
     if (subs.length) return html + subs.map((h) => fila(h, prof + 1)).join('');
@@ -623,6 +625,30 @@ function pintarEquipo() {
   };
   el.innerHTML = `<div class="card">${raices.map((u) => fila(u, 0)).join('')}</div>
     <div class="muted small">Tocá un nombre para ver su equipo. En los movilizadores se ve su gente.</div>`;
+}
+
+function hojaQuitarUsuario(uid) {
+  const u = usuarioPorId(uid);
+  if (!u) return;
+  const debajo = st.usuarios.filter((x) => x.uid !== u.uid && x.path.includes(u.uid));
+  const gente = st.personas.filter((p) => p.ownerId === u.uid);
+  const destinos = [st.me, ...miEquipo()].filter((x) => x.uid !== u.uid && !x.path.includes(u.uid));
+  abrirHoja(`
+    <div class="row"><div class="ini rol-${u.rol}" style="width:48px;height:48px;border-radius:24px">${esc(iniciales(u.nombre))}</div>
+      <div class="grow"><h2>${esc(u.nombre)}</h2><div class="muted num">${ROL_LABEL[u.rol]} · DNI ${fmtDni(u.dni)}</div></div>
+      <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    ${debajo.length ? `<div class="aviso warn">${ic('alerta', 18)}<span>Tiene ${debajo.length} ${debajo.length === 1 ? 'persona' : 'personas'} en su equipo. Para quitarlo, primero quitá a los que tiene debajo.</span></div>` : `
+    <div class="card pad stack">
+      <h3>Quitar del equipo</h3>
+      <div class="muted">Deja de poder entrar a la app. Si lo agregaste con un error (nombre, rol o superior equivocado), quitalo y volvé a agregarlo bien: puede usar el mismo DNI.</div>
+      ${gente.length ? `<div><label class="label" for="qu-destino">Sus ${gente.length} personas cargadas</label>
+        <select id="qu-destino" class="input">
+          ${ordenarArbol(destinos).map((x) => `<option value="${x.uid}">Pasan a ${esc(x.nombre)}${x.uid === st.me.uid ? ' (vos)' : ' · ' + ROL_CORTO[x.rol]}</option>`).join('')}
+          <option value="__borrar">Se borran</option>
+        </select></div>` : '<div class="muted small">No cargó a nadie.</div>'}
+      <div class="error" id="qu-err" role="alert"></div>
+      <button class="btn btn-bad btn-full" data-act="eq-quitar" data-uid="${u.uid}">Quitar a ${esc(primerNombre(u.nombre))}</button>
+    </div>`}`, { tipo: 'usuario' });
 }
 
 function hojaNuevoUsuario(rol) {
@@ -654,9 +680,9 @@ async function crearUsuario(form) {
   const btn = form.querySelector('button[type=submit]');
   btn.disabled = true; btn.textContent = 'Creando…';
   try {
-    await S.crearUsuario({ dni, nombre, tel, rol, pass, circuito });
+    const r = await S.crearUsuario({ dni, nombre, tel, rol, pass, circuito });
     const link = location.origin + location.pathname;
-    const msg = `Hola ${primerNombre(nombre)}! Ya tenés acceso a ${APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? ' del circuito ' + circuito : ''}.\nEntrá en ${link}\nDNI: ${dni}\nContraseña: ${pass}`;
+    const msg = `Hola ${primerNombre(nombre)}! Ya tenés acceso a ${APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? ' del circuito ' + circuito : ''}.\nEntrá en ${link}\nDNI: ${dni}\nContraseña: ${r?.reactivado ? 'la misma que usabas antes' : pass}`;
     const wa = waUrl(tel, msg);
     hojaHtml(`
       <div class="aviso ok">${ic('ok', 18)}<span>${esc(nombre)} ya puede entrar.</span></div>
@@ -934,6 +960,22 @@ const acciones = {
   'dia-solo': (el) => { st.dia.solo = el.dataset.v; pintarDia(); },
   'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol),
   'eq-toggle': (el) => { const id = el.dataset.uid; if (st.abiertos.has(id)) st.abiertos.delete(id); else st.abiertos.add(id); pintarEquipo(); },
+  'eq-opciones': (el) => hojaQuitarUsuario(el.dataset.uid),
+  'eq-quitar': async (el) => {
+    const u = usuarioPorId(el.dataset.uid);
+    const sel = $('#qu-destino')?.value;
+    const destino = sel && sel !== '__borrar' ? usuarioPorId(sel) : null;
+    const dnis = st.personas.filter((p) => p.ownerId === u.uid).map((p) => p.dni);
+    el.disabled = true; el.textContent = 'Quitando…';
+    try {
+      await S.quitarUsuario(u, dnis, destino);
+      cerrarHoja();
+      toast(`${primerNombre(u.nombre)} ya no está en el equipo${dnis.length ? (destino ? ` · su gente pasó a ${destino.nombre}` : ' · su gente se borró') : ''}`);
+    } catch (e) {
+      $('#qu-err').textContent = mensajeError(e);
+      el.disabled = false; el.textContent = 'Quitar';
+    }
+  },
   'eq-ver-gente': (el) => { st.tab = 'gente'; st.f = { estado: 'todos', q: '', de: el.dataset.uid, limite: 60 }; pintar(); },
   copiar: async (el) => {
     try { await navigator.clipboard.writeText(el.dataset.txt); toast('Mensaje copiado'); }
