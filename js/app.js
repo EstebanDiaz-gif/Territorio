@@ -751,7 +751,8 @@ function pintarConflictos() {
         <div class="row"><div class="grow"><b class="num">DNI ${fmtDni(c.dni)}</b>${p ? ` · ${esc(p.nombre)}` : ''}<div class="muted small">Intentó cargarlo <b>${esc(c.byNombre)}</b>${p ? ` · hoy es de <b>${esc(p.ownerNombre)}</b>` : ''}</div></div>
         <span class="pill ${c.estado === 'reclamo' ? 'p-warn' : 'p-neutral'}">${c.estado === 'reclamo' ? 'Reclamo' : 'Intento'}</span></div>
         ${c.motivo ? `<div class="small">“${esc(c.motivo)}”</div>` : ''}
-        ${cab ? `<div class="row"><button class="btn btn-sec btn-sm grow" data-act="conf-no" data-id="${c.id}">Dejar como está</button><button class="btn btn-sm grow" data-act="conf-si" data-id="${c.id}">Pasar a ${esc(primerNombre(c.byNombre))}</button></div>` : ''}
+        ${cab ? (p ? `<div class="row"><button class="btn btn-sec btn-sm grow" data-act="conf-no" data-id="${c.id}">Dejar como está</button><button class="btn btn-sm grow" data-act="conf-si" data-id="${c.id}">Pasar a ${esc(primerNombre(c.byNombre))}</button></div>`
+          : `<div class="muted small">Esta persona ya no está cargada.</div><button class="btn btn-sec btn-sm" data-act="conf-no" data-id="${c.id}">Quitar de la lista</button>`) : ''}
       </div>`;
     }).join('')}</div>`;
 }
@@ -939,7 +940,7 @@ const acciones = {
     catch { const r = document.createRange(); r.selectNodeContents($('#nu-msg')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Seleccioná y copiá el texto'); }
   },
   'conf-si': async (el) => { const c = st.conflictos.find((x) => x.id === el.dataset.id); try { await S.resolverConflicto(c, true); toast(`Pasada a ${c.byNombre}`); } catch (e) { toast(mensajeError(e)); } },
-  'conf-no': async (el) => { const c = st.conflictos.find((x) => x.id === el.dataset.id); try { await S.resolverConflicto(c, false); toast('Queda como estaba'); } catch (e) { toast(mensajeError(e)); } },
+  'conf-no': async (el) => { const c = st.conflictos.find((x) => x.id === el.dataset.id); try { await S.resolverConflicto(c, false); toast('Conflicto cerrado'); } catch (e) { toast(mensajeError(e)); } },
   borrar: async () => {
     const que = $('#borrar-que').value;
     const res = $('#borrar-res');
@@ -948,7 +949,11 @@ const acciones = {
     res.innerHTML = '<div class="muted" id="borrar-txt">Borrando…</div><div class="progreso"><i id="borrar-prog"></i></div>';
     const prog = (h, t) => { const b = $('#borrar-prog'); if (b) b.style.width = pct(h, t) + '%'; const x = $('#borrar-txt'); if (x) x.textContent = `Borrando ${h.toLocaleString('es-AR')} de ${t.toLocaleString('es-AR')}…`; };
     try {
-      if (que === 'personas') await S.borrarPersonas(dnis, prog); else await S.borrarPadron(prog);
+      if (que === 'personas') {
+        await S.borrarPersonas(dnis, prog);
+        // Los conflictos pendientes ya no tienen sentido: se cierran
+        for (const c of st.conflictos.filter((x) => x.estado === 'intento' || x.estado === 'reclamo')) { try { await S.resolverConflicto(c, false); } catch { /* sigue */ } }
+      } else await S.borrarPadron(prog);
       $('#borrar-ok').value = '';
       res.innerHTML = `<div class="aviso ok">${ic('ok', 18)}<span>${que === 'personas' ? `Listo: se borraron ${dnis.length.toLocaleString('es-AR')} personas.` : 'Listo: se borró el padrón.'}</span></div>`;
     } catch (e) {

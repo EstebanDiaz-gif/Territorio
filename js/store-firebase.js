@@ -188,8 +188,10 @@ export function reclamar(id, motivo) {
 export async function resolverConflicto(c, aceptar) {
   if (aceptar) {
     const u = (await getDoc(D('usuarios', c.byId))).data();
-    await updateDoc(D('personas', c.dni), { ownerId: u.uid, ownerNombre: u.nombre, path: u.path, actualizadoAt: serverTimestamp() });
+    const p = await getDoc(D('personas', c.dni));
+    if (u && p.exists()) await updateDoc(D('personas', c.dni), { ownerId: u.uid, ownerNombre: u.nombre, path: u.path, actualizadoAt: serverTimestamp() });
   }
+  // Si la persona ya no existe, igual se cierra el conflicto
   await updateDoc(D('conflictos', c.id), { estado: aceptar ? 'aceptado' : 'rechazado', resueltoPor: me.nombre });
 }
 export async function duenoDe(dni) {
