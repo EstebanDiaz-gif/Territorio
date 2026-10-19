@@ -891,11 +891,11 @@ async function crearUsuario(form) {
     const r = await S.crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre, domicilio });
     const link = location.origin + location.pathname;
     if (r?.invitado) {
-      const msgI = `Hola ${primerNombre(nombre)}! Te sumamos a ${st.me.campania || APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? (circuitosDe(circuito).length > 1 ? ' de los ' : ' del ') + textoCircuitos(circuito).toLowerCase() : ''}.\nEntrá en ${link} con tu DNI (${dni}) y la misma contraseña que ya usabas en ${APP_NAME}. Al entrar quedás en el equipo.`;
+      const msgI = `Hola ${primerNombre(nombre)}! Te sumamos a ${st.me.campania || APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? (circuitosDe(circuito).length > 1 ? ' de los ' : ' del ') + textoCircuitos(circuito).toLowerCase() : ''}.\nEntrá en ${link} con tu DNI (${dni}) y la misma contraseña que ya usabas en ${APP_NAME}. Al entrar quedás en el equipo.\nSi no te acordás de la contraseña, avisame y te genero una nueva.`;
       const waI = waUrl(tel, msgI);
       hojaHtml(`
         <div class="aviso warn">${ic('alerta', 18)}<span><b>${esc(nombre)} ya tenía usuario de ${APP_NAME}</b> (de otra campaña). Quedó invitado: aparece en tu equipo cuando entre con su DNI y su contraseña de siempre.</span></div>
-        <div class="muted small">Si sigue activo en otra campaña, primero lo tienen que quitar de allá.</div>
+        <div class="muted small">Si sigue activo en otra campaña, primero lo tienen que quitar de allá. Si no se acuerda de su contraseña, pedile al soporte de ${APP_NAME} que se la blanquee.</div>
         <div class="card pad stack"><div class="muted small">Mandale este mensaje:</div><div style="white-space:pre-line">${esc(msgI)}</div></div>
         ${waI ? `<a class="btn btn-full" href="${waI}" target="_blank" rel="noopener">${ic('wa')} Enviar por WhatsApp</a>` : ''}
         <button class="btn btn-sec" data-act="copiar" data-txt="${esc(msgI)}">Copiar mensaje</button>
