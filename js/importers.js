@@ -138,11 +138,11 @@ function filasDeTablas(leido) {
 }
 
 // ---------- Planilla de personas (movilizados, fiscales) ----------
-export function mapearPersonas(leido) {
+export function mapearPersonas(leido, { fiscales = false } = {}) {
   const info = leerEncabezados(leido.lineas);
   const { filas, encontrado, columnas } = filasDeTablas(leido);
   if (!encontrado) throw new Error('No encontré una tabla con columnas de DNI y nombre en el archivo.');
-  const esFiscales = /fiscal/i.test(info.titulo + ' ' + leido.nombre);
+  const esFiscales = fiscales || /fiscal/i.test(info.titulo + ' ' + leido.nombre);
   const validas = [];
   const invalidas = [];
   const vistos = new Set();

@@ -71,6 +71,8 @@ const I = {
   subir: '<path d="M12 15V3M7 8l5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
   bajar: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
   auto: '<path d="M3 16v-5l2-5h11l3 5h2v5h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/>',
+  fiscal: '<path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
+  padron: '<path d="M5 3h11l3 3v15H5z"/><path d="M9 9h6M9 13h6M9 17h4"/>',
   mas3: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   logo: '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V6l4-3 4 3v4M9.5 15l1.8 1.8 3.4-3.6"/>'
 };
@@ -708,38 +710,41 @@ async function crearUsuario(form) {
 
 // ---------------------------------------------------------------- PANEL
 function vistaPanel() {
+  const herr = (id, icono, titulo, sub, cuerpo) => `
+    <details class="herr" name="herr" id="h-${id}">
+      <summary><span class="herr-ic">${ic(icono, 20)}</span><span class="grow"><b>${titulo}</b><span class="muted small" style="display:block">${sub}</span></span><span class="chev" aria-hidden="true">▸</span></summary>
+      <div class="herr-body stack">${cuerpo}</div>
+    </details>`;
+  const subir = (pre, texto) => `<label class="archivo" for="${pre}-file">${ic('subir', 22)}<div><b>${texto}</b></div><input id="${pre}-file" type="file" accept=".xlsx,.xls,.csv,.docx,.ods"></label><div id="${pre}-res" class="stack"></div>`;
   return `
     <div id="tablero" class="stack"></div>
     <div id="conflictos"></div>
-    <div class="sec-title"><h2>Lista de gente de tu equipo</h2></div>
-    <div class="card pad stack">
-      <div class="muted">Excel, CSV o Word con una tabla. Detecta las columnas solo, limpia los DNI y completa escuela y mesa con el padrón. Los DNI que ya son de otro no se importan.</div>
-      <label class="archivo" for="imp-file">${ic('subir', 22)}<div><b>Elegir archivo</b></div><input id="imp-file" type="file" accept=".xlsx,.xls,.csv,.docx,.ods"></label>
-      <div id="imp-res" class="stack"></div>
-    </div>
-    ${puedePadron() ? `
-    <div class="sec-title"><h2>Padrón oficial · solo cabezas</h2>${S.padronCantidad?.() != null ? `<span class="muted num">${S.padronCantidad().toLocaleString('es-AR')} cargados</span>` : ''}</div>
-    <div class="card pad stack">
-      <div class="muted">Subí el padrón que recibe el partido (Excel o CSV). Con esto, al escribir un DNI se completan nombre, escuela, mesa y orden.</div>
-      <div><label class="label" for="pad-circ">Circuito (si el archivo no trae esa columna)</label><input id="pad-circ" class="input" inputmode="numeric" value="${esc(st.me.circuito || '')}" placeholder="Ej: 19"></div>
-      <label class="archivo" for="pad-file">${ic('subir', 22)}<div><b>Elegir padrón</b></div><input id="pad-file" type="file" accept=".xlsx,.xls,.csv,.ods,.docx"></label>
-      <div id="pad-res" class="stack"></div>
-    </div>` : ''}
-    <div class="sec-title"><h2>Exportar</h2></div>
-    <button class="btn btn-sec" data-act="exportar">${ic('bajar')} Descargar Excel de mi equipo</button>
-    ${st.me.rol === 'cabeza' ? `
-    <div class="sec-title"><h2>Borrar datos</h2></div>
-    <div class="card pad stack">
-      <div class="muted">Para empezar de nuevo. No se puede deshacer.</div>
-      <div><label class="label" for="borrar-que">Qué borrar</label>
-        <select id="borrar-que" class="input">
-          <option value="personas">Toda la gente cargada (${st.personas.length.toLocaleString('es-AR')})</option>
-          <option value="padron">El padrón</option>
-        </select></div>
-      <div><label class="label" for="borrar-ok">Escribí BORRAR para confirmar</label><input id="borrar-ok" class="input" autocomplete="off"></div>
-      <button class="btn btn-bad" data-act="borrar">Borrar</button>
-      <div id="borrar-res" class="stack"></div>
-    </div>` : ''}`;
+    <div class="sec-title"><h2>Herramientas</h2></div>
+    <div class="stack" style="gap:8px">
+      ${herr('gente', 'gente', 'Cargar lista de gente', 'Excel, CSV o Word de tu equipo', `
+        <div class="muted">Detecta las columnas solo, limpia los DNI y completa escuela y mesa con el padrón. Los DNI que ya son de otro no se importan.</div>
+        ${subir('imp', 'Elegir archivo')}`)}
+      ${herr('fiscales', 'fiscal', 'Cargar fiscales', 'Planilla de titulares y suplentes', `
+        <div class="muted">Todos quedan como <b>fiscales</b>. Si en la planilla hay una fila que dice <b>SUPLENTES</b>, los de abajo quedan como suplentes. Si alguno ya estaba en tu equipo como votante, pasa a ser fiscal.</div>
+        ${subir('fis', 'Elegir planilla de fiscales')}`)}
+      ${puedePadron() ? herr('padron', 'padron', 'Padrón oficial', 'Solo cabezas' + (S.padronCantidad?.() != null ? ` · ${S.padronCantidad().toLocaleString('es-AR')} electores` : ''), `
+        <div class="muted">Subí el padrón que recibe el partido (Excel o CSV). Con esto, al escribir un DNI se completan nombre, escuela, mesa y orden.</div>
+        <div><label class="label" for="pad-circ">Circuito (si el archivo no trae esa columna)</label><input id="pad-circ" class="input" inputmode="numeric" value="${esc(st.me.circuito || '')}" placeholder="Ej: 19"></div>
+        <label class="archivo" for="pad-file">${ic('subir', 22)}<div><b>Elegir padrón</b></div><input id="pad-file" type="file" accept=".xlsx,.xls,.csv,.ods,.docx"></label>
+        <div id="pad-res" class="stack"></div>`) : ''}
+      ${herr('excel', 'bajar', 'Descargar Excel', 'Toda la gente de tu equipo', `
+        <button class="btn btn-sec" data-act="exportar">${ic('bajar')} Descargar Excel</button>`)}
+      ${st.me.rol === 'cabeza' ? herr('borrar', 'alerta', 'Borrar datos', 'Para empezar de nuevo', `
+        <div class="muted">No se puede deshacer.</div>
+        <div><label class="label" for="borrar-que">Qué borrar</label>
+          <select id="borrar-que" class="input">
+            <option value="personas">Toda la gente cargada (${st.personas.length.toLocaleString('es-AR')})</option>
+            <option value="padron">El padrón</option>
+          </select></div>
+        <div><label class="label" for="borrar-ok">Escribí BORRAR para confirmar</label><input id="borrar-ok" class="input" autocomplete="off"></div>
+        <button class="btn btn-bad" data-act="borrar">Borrar</button>
+        <div id="borrar-res" class="stack"></div>`) : ''}
+    </div>`;
 }
 
 function pintarTablero() {
@@ -843,19 +848,20 @@ function pintarConflictos() {
 }
 
 // ----- importar planilla de personas
-async function analizarImportacion(file) {
-  const res = $('#imp-res');
+async function analizarImportacion(file, pre = 'imp') {
+  const fis = pre === 'fis';
+  const res = $(`#${pre}-res`);
   res.innerHTML = '<div class="muted">Leyendo archivo…</div>';
   try {
     const leido = await leerArchivo(file);
-    const m = mapearPersonas(leido);
+    const m = mapearPersonas(leido, { fiscales: fis });
     const pareceePadron = m.columnas.includes('mesa') && m.columnas.includes('orden') && m.validas.length > 500;
     if (pareceePadron || m.validas.length > 3000) {
-      $('#imp-file').value = '';
-      res.innerHTML = `<div class="aviso warn">${ic('alerta', 18)}<span>Este archivo tiene ${m.validas.length.toLocaleString('es-AR')} personas${pareceePadron ? ' con mesa y número de orden: parece un padrón' : ''}. ${puedePadron() ? 'Subilo más abajo, en la sección <b>Padrón oficial</b>.' : 'El padrón lo sube una cabeza.'} Acá van solo las listas de gente de cada equipo (hasta 3.000 por archivo).</span></div>`;
+      $(`#${pre}-file`).value = '';
+      res.innerHTML = `<div class="aviso warn">${ic('alerta', 18)}<span>Este archivo tiene ${m.validas.length.toLocaleString('es-AR')} personas${pareceePadron ? ' con mesa y número de orden: parece un padrón' : ''}. ${puedePadron() ? 'Subilo en <b>Padrón oficial</b>.' : 'El padrón lo sube una cabeza.'} Acá van solo las listas de gente de cada equipo (hasta 3.000 por archivo).</span></div>`;
       return;
     }
-    res.innerHTML = `<div class="muted">Revisando ${m.validas.length} personas contra el padrón y la base…</div><div class="progreso"><i id="imp-prog"></i></div>`;
+    res.innerHTML = `<div class="muted">Revisando ${m.validas.length} personas contra el padrón y la base…</div><div class="progreso"><i id="${pre}-prog"></i></div>`;
     const nuevas = []; const propias = []; const ocupadas = [];
     let delPadron = 0; let noPadron = 0; let i = 0;
     await enParalelo(m.validas, 5, async (v) => {
@@ -866,12 +872,12 @@ async function analizarImportacion(file) {
         Object.assign(d, { nombre: pd.nombre || v.nombre, domicilio: pd.domicilio || v.domicilio, circuito: pd.circuito || v.circuito, escuela: pd.escuela || v.escuela, dirEscuela: pd.dirEscuela || v.dirEscuela, mesa: pd.mesa || v.mesa, orden: pd.orden || '', enPadron: true });
       } else { noPadron++; d.enPadron = false; }
       (cons.estado === 'libre' ? nuevas : cons.estado === 'propia' ? propias : ocupadas).push(d);
-      const bar = $('#imp-prog'); if (bar) bar.style.width = pct(++i, m.validas.length) + '%';
+      const bar = $(`#${pre}-prog`); if (bar) bar.style.width = pct(++i, m.validas.length) + '%';
     });
     // ¿Quién figura como referente en la planilla?
     const refTxt = sinAcentos(m.info.meta.referente || m.info.meta.dirigente || m.info.meta.movilizador || '');
     const sugerido = refTxt ? [st.me, ...miEquipo()].find((u) => sinAcentos(u.nombre).split(/\s+/).every((w) => refTxt.includes(w))) : null;
-    st.imp = { nuevas, propias, ocupadas, m, delPadron, noPadron, archivo: file.name };
+    st.imp = { ...(st.imp || {}), [pre]: { nuevas, propias, ocupadas, m, delPadron, noPadron, archivo: file.name } };
     const suplentes = nuevas.filter((x) => x.tipo === 'fiscal_suplente').length;
     const fiscales = nuevas.filter((x) => x.tipo === 'fiscal').length;
     const rev = nuevas.filter((x) => x.revisar).length;
@@ -883,27 +889,29 @@ async function analizarImportacion(file) {
         <div class="tile t-acc"><b>${delPadron}</b><span>con escuela y mesa del padrón</span></div>
         <div class="tile ${rev ? 't-warn' : 't-neutral'}"><b>${rev}</b><span>con teléfono o nombre a revisar</span></div>
         <div class="tile ${ocupadas.length ? 't-bad' : 't-neutral'}"><b>${ocupadas.length}</b><span>ya son de otro (no se importan)</span></div>
-        <div class="tile t-neutral"><b>${propias.length}</b><span>ya estaban en tu equipo</span></div>
+        <div class="tile t-neutral"><b>${propias.length}</b><span>ya estaban en tu equipo${fis && propias.length ? ' (pasan a fiscales)' : ''}</span></div>
         <div class="tile t-neutral"><b>${m.invalidas.length + m.repetidasEnArchivo}</b><span>filas con DNI inválido o repetidas</span></div>
       </div>
       ${m.invalidas.length ? `<details class="small"><summary>Ver filas con problemas</summary><ul>${m.invalidas.map((x) => `<li>${esc(x.nombre || '(sin nombre)')}: ${esc(x.motivo)}${x.dniTxt ? ' (' + esc(x.dniTxt) + ')' : ''}</li>`).join('')}</ul></details>` : ''}
       ${nuevas.length ? `
-        <div><label class="label" for="imp-dueno">Asignar a</label>
-          <select id="imp-dueno" class="input">${ordenarArbol([st.me, ...miEquipo()]).map((u) => `<option value="${u.uid}" ${sugerido?.uid === u.uid ? 'selected' : ''}>${esc(u.nombre)}${u.uid === st.me.uid ? ' (vos)' : ' · ' + ROL_CORTO[u.rol]}</option>`).join('')}</select>
+        <div><label class="label" for="${pre}-dueno">Asignar a</label>
+          <select id="${pre}-dueno" class="input">${ordenarArbol([st.me, ...miEquipo()]).map((u) => `<option value="${u.uid}" ${sugerido?.uid === u.uid ? 'selected' : ''}>${esc(u.nombre)}${u.uid === st.me.uid ? ' (vos)' : ' · ' + ROL_CORTO[u.rol]}</option>`).join('')}</select>
           ${m.info.meta.referente ? `<div class="muted small" style="margin-top:4px">La planilla dice referente: ${esc(m.info.meta.referente)}${sugerido ? '' : ' (no coincide con nadie de tu equipo)'}</div>` : ''}
         </div>
-        <button class="btn btn-full" data-act="imp-confirmar">Importar ${nuevas.length} ${nuevas.length === 1 ? 'persona' : 'personas'}</button>` : ''}`;
+        <button class="btn btn-full" data-act="imp-confirmar" data-pre="${pre}">Importar ${nuevas.length} ${fis ? (nuevas.length === 1 ? 'fiscal' : 'fiscales') : (nuevas.length === 1 ? 'persona' : 'personas')}</button>` : ''}
+      ${!nuevas.length && fis && propias.length ? `<button class="btn btn-full" data-act="imp-confirmar" data-pre="${pre}">Marcar ${propias.length} como fiscales</button>` : ''}`;
   } catch (e) {
     res.innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>${esc(mensajeError(e))}</span></div>`;
   }
 }
 
-async function confirmarImportacion() {
-  const imp = st.imp;
+async function confirmarImportacion(pre = 'imp') {
+  const imp = st.imp?.[pre];
   if (!imp) return;
-  const dueno = usuarioPorId($('#imp-dueno')?.value) || st.me;
-  const res = $('#imp-res');
-  res.innerHTML = `<div class="muted">Importando…</div><div class="progreso"><i id="imp-prog"></i></div>`;
+  const fis = pre === 'fis';
+  const dueno = usuarioPorId($(`#${pre}-dueno`)?.value) || st.me;
+  const res = $(`#${pre}-res`);
+  res.innerHTML = `<div class="muted">Importando…</div><div class="progreso"><i id="${pre}-prog"></i></div>`;
   let ok = 0; let conflictos = imp.ocupadas.length; let i = 0;
   const total = imp.nuevas.length + imp.ocupadas.length;
   await enParalelo([...imp.nuevas, ...imp.ocupadas], 4, async (d) => {
@@ -911,11 +919,14 @@ async function confirmarImportacion() {
       const r = await S.cargarPersona({ ...d, estado: 'sin' }, dueno);
       if (r.ok) ok++; else if (r.conflicto && imp.nuevas.includes(d)) conflictos++;
     } catch { /* se informa abajo */ }
-    const bar = $('#imp-prog'); if (bar) bar.style.width = pct(++i, total) + '%';
+    const bar = $(`#${pre}-prog`); if (bar) bar.style.width = pct(++i, total) + '%';
   });
-  st.imp = null;
-  $('#imp-file').value = '';
-  res.innerHTML = `<div class="aviso ok">${ic('ok', 18)}<span>Listo: ${ok} importadas a ${esc(dueno.uid === st.me.uid ? 'tu lista' : dueno.nombre)}.${conflictos ? ` ${conflictos} quedaron como conflicto.` : ''}</span></div>`;
+  // Fiscales que ya estaban en el equipo como votantes: se marcan como fiscales
+  let marcados = 0;
+  if (fis) for (const d of imp.propias) { try { await S.actualizarPersona(d.dni, { tipo: d.tipo }); marcados++; } catch { /* sigue */ } }
+  delete st.imp[pre];
+  $(`#${pre}-file`).value = '';
+  res.innerHTML = `<div class="aviso ok">${ic('ok', 18)}<span>Listo: ${ok} ${fis ? 'fiscales cargados' : 'importadas'} a ${esc(dueno.uid === st.me.uid ? 'tu lista' : dueno.nombre)}.${marcados ? ` ${marcados} que ya estaban pasaron a fiscales.` : ''}${conflictos ? ` ${conflictos} quedaron como conflicto.` : ''}</span></div>`;
 }
 
 // ----- padrón
@@ -1068,7 +1079,7 @@ const acciones = {
       res.innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>${esc(mensajeError(e))}. Si cortó a la mitad, tocá Borrar de nuevo.</span></div>`;
     }
   },
-  'imp-confirmar': confirmarImportacion,
+  'imp-confirmar': (el) => confirmarImportacion(el.dataset.pre || 'imp'),
   'pad-confirmar': confirmarPadron,
   exportar: async () => {
     try { await exportarExcel(st.personas, st.usuarios, `${APP_NAME}-${new Date().toISOString().slice(0, 10)}.xlsx`); toast('Excel descargado'); }
@@ -1129,7 +1140,8 @@ document.addEventListener('change', async (e) => {
     if (id === 'p-nota') { await S.actualizarPersona(dni, { nota: e.target.value.trim(), revisar: false }); toast('Nota guardada'); }
     if (id === 'p-tipo') { await S.actualizarPersona(dni, { tipo: e.target.value }); }
   }
-  if (id === 'imp-file' && e.target.files[0]) analizarImportacion(e.target.files[0]);
+  if (id === 'imp-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'imp');
+  if (id === 'fis-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'fis');
   if (id === 'pad-file' && e.target.files[0]) analizarPadron(e.target.files[0]);
 });
 
