@@ -1,0 +1,100 @@
+rules_version = '2';
+
+// Reglas de seguridad de Territorio.
+// Jerarquía: cabeza > encargado > dirigente > movilizador.
+// Cada usuario y cada persona guarda "path": la lista de sus superiores (y del propio dueño).
+// Ver o editar algo = estar en su path. Las cabezas ven toda la campaña.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // A qué campaña pertenece cada cuenta
+    match /cuentas/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /campanias/{cid} {
+      function ruta(sub) { return path('/databases/' + database + '/documents/campanias/' + cid + sub); }
+      function miembro() { return request.auth != null && exists(ruta('/usuarios/' + request.auth.uid)); }
+      function yo() { return get(ruta('/usuarios/' + request.auth.uid)).data; }
+      function esCabeza() { return miembro() && yo().rol == 'cabeza'; }
+      function usuario(uid) { return get(ruta('/usuarios/' + uid)).data; }
+      function nivel(r) {
+        return r == 'cabeza' ? 0 : (r == 'encargado' ? 1 : (r == 'dirigente' ? 2 : (r == 'movilizador' ? 3 : 9)));
+      }
+      function enMiEquipo(p) { return request.auth.uid in p; }
+      function soloCambia(campos) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(campos);
+      }
+
+      allow read: if miembro();
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if esCabeza() && soloCambia(['nombre']);
+
+      // ---------- Usuarios ----------
+      match /usuarios/{uid} {
+        allow read: if miembro() && (esCabeza() || enMiEquipo(resource.data.path));
+        allow create: if request.auth != null && request.resource.data.uid == uid && (
+          // la primera cabeza, al crear la campaña
+          (uid == request.auth.uid
+            && get(ruta('')).data.ownerUid == request.auth.uid
+            && request.resource.data.rol == 'cabeza'
+            && request.resource.data.path == [uid])
+          // otra cabeza, creada por una cabeza
+          || (esCabeza() && request.resource.data.rol == 'cabeza' && request.resource.data.path == [uid])
+          // alguien del nivel de abajo, creado por su superior directo
+          || (miembro()
+            && nivel(request.resource.data.rol) == nivel(yo().rol) + 1
+            && request.resource.data.parentId == request.auth.uid
+            && request.resource.data.path == yo().path.concat([uid]))
+        );
+        allow update: if miembro() && (esCabeza() || (enMiEquipo(resource.data.path) && request.auth.uid != uid))
+          && soloCambia(['nombre', 'tel', 'activo']);
+        allow delete: if esCabeza();
+      }
+
+      // ---------- Padrón (en baldes por los últimos 3 dígitos del DNI) ----------
+      match /padron/{balde} {
+        allow read: if miembro();
+        allow write: if miembro() && (yo().rol == 'cabeza' || yo().rol == 'encargado');
+      }
+
+      // ---------- Personas (id = DNI: no puede haber dos con el mismo DNI) ----------
+      match /personas/{dni} {
+        // get de un DNI que no existe: se permite para saber que está libre
+        allow get: if miembro() && (resource == null || esCabeza() || enMiEquipo(resource.data.path));
+        allow list: if miembro() && (esCabeza() || enMiEquipo(resource.data.path));
+
+        // Se carga a nombre propio o de alguien de mi equipo, con el path real de ese dueño
+        allow create: if miembro()
+          && request.resource.data.dni == dni
+          && request.resource.data.path == usuario(request.resource.data.ownerId).path
+          && (esCabeza() || enMiEquipo(request.resource.data.path))
+          && request.resource.data.voto == false;
+
+        allow update: if miembro() && (esCabeza() || enMiEquipo(resource.data.path)) && (
+          // cambios comunes
+          soloCambia(['estado', 'tel', 'voto', 'votoAt', 'nota', 'tipo', 'revisar', 'actualizadoAt'])
+          // transferencia a otro dueño dentro de mi equipo (las cabezas, a cualquiera)
+          || (soloCambia(['ownerId', 'ownerNombre', 'path', 'actualizadoAt'])
+            && request.resource.data.path == usuario(request.resource.data.ownerId).path
+            && (esCabeza() || enMiEquipo(request.resource.data.path)))
+        );
+        allow delete: if miembro() && (esCabeza() || enMiEquipo(resource.data.path));
+      }
+
+      // ---------- Conflictos: intentos de cargar a alguien que ya es de otro ----------
+      match /conflictos/{id} {
+        allow read: if miembro() && (esCabeza() || enMiEquipo(resource.data.byPath));
+        allow create: if miembro()
+          && request.resource.data.byId == request.auth.uid
+          && request.resource.data.byPath == yo().path
+          && request.resource.data.estado == 'intento';
+        allow update: if miembro() && (
+          (resource.data.byId == request.auth.uid && soloCambia(['estado', 'motivo']) && request.resource.data.estado == 'reclamo')
+          || (esCabeza() && soloCambia(['estado', 'resueltoPor']))
+        );
+      }
+    }
+  }
+}
