@@ -1,6 +1,6 @@
 // Guarda la app en el celular para que abra sin señal.
 // Cada vez que publiques cambios, subí el número de VERSION.
-const VERSION = 'territorio-v7';
+const VERSION = 'territorio-v8';
 const ARCHIVOS = [
   './', './index.html', './manifest.json', './css/app.css',
   './js/app.js', './js/config.js', './js/roles.js', './js/importers.js', './js/store-demo.js', './js/store-firebase.js',
@@ -24,8 +24,10 @@ self.addEventListener('fetch', (e) => {
   const libreria = /cdnjs\.cloudflare\.com|gstatic\.com|fonts\.googleapis\.com/.test(url.host);
   if (!propio && !libreria) return;
   // Primero la red (para tener siempre lo último); si no hay señal, lo guardado
+  // Los archivos propios se piden siempre frescos (sin la caché del navegador) para ver la última versión
+  const pedido = propio ? new Request(e.request, { cache: 'no-cache' }) : e.request;
   e.respondWith(
-    fetch(e.request).then((r) => {
+    fetch(pedido).then((r) => {
       if (r.ok || r.type === 'opaque') { const copia = r.clone(); caches.open(VERSION).then((c) => c.put(e.request, copia)); }
       return r;
     }).catch(() => caches.match(e.request, { ignoreSearch: true })
