@@ -46,7 +46,7 @@ const pausa = (t) => new Promise((r) => setTimeout(r, t));
 function mensajeError(e) {
   const c = e?.code || '';
   if (/invalid-credential|wrong-password|user-not-found|invalid-email/.test(c)) return 'DNI o contraseña incorrectos.';
-  if (/email-already-in-use/.test(c)) return 'Ese DNI ya tiene un usuario creado.';
+  if (/email-already-in-use/.test(c)) return 'Ese DNI ya está en el equipo de otra persona. No se puede agregar dos veces. Si quedó mal ubicado, pedile a quien lo agregó que lo quite y después sumalo vos.';
   if (/weak-password/.test(c)) return 'La contraseña tiene que tener al menos 6 caracteres.';
   if (/network|unavailable/.test(c)) return 'No hay conexión. Probá de nuevo cuando tengas señal.';
   if (/too-many-requests/.test(c)) return 'Demasiados intentos. Esperá unos minutos.';
@@ -676,6 +676,12 @@ async function crearUsuario(form) {
   const circuito = normDni($('#nu-circ')?.value || '') || '';
   const err = $('#nu-err');
   if (!dniValido(dni)) { err.textContent = 'El DNI tiene que tener 7 u 8 números.'; return; }
+  const ya = st.usuarios.find((u) => u.dni === dni);
+  if (ya) {
+    const jefe = usuarioPorId(ya.parentId);
+    err.textContent = `${ya.nombre} ya está en el equipo como ${ROL_CORTO[ya.rol].toLowerCase()}${jefe ? ', debajo de ' + jefe.nombre : ''}. No se puede agregar dos veces.`;
+    return;
+  }
   if (pass.length < 6 && !DEMO) { err.textContent = 'La contraseña tiene que tener al menos 6 caracteres.'; return; }
   const btn = form.querySelector('button[type=submit]');
   btn.disabled = true; btn.textContent = 'Creando…';
