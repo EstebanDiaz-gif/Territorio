@@ -663,7 +663,20 @@ function vistaPanel() {
       <div id="pad-res" class="stack"></div>
     </div>` : ''}
     <div class="sec-title"><h2>Exportar</h2></div>
-    <button class="btn btn-sec" data-act="exportar">${ic('bajar')} Descargar Excel de mi equipo</button>`;
+    <button class="btn btn-sec" data-act="exportar">${ic('bajar')} Descargar Excel de mi equipo</button>
+    ${st.me.rol === 'cabeza' ? `
+    <div class="sec-title"><h2>Borrar datos</h2></div>
+    <div class="card pad stack">
+      <div class="muted">Para empezar de nuevo. No se puede deshacer.</div>
+      <div><label class="label" for="borrar-que">Qué borrar</label>
+        <select id="borrar-que" class="input">
+          <option value="personas">Toda la gente cargada (${st.personas.length.toLocaleString('es-AR')})</option>
+          <option value="padron">El padrón</option>
+        </select></div>
+      <div><label class="label" for="borrar-ok">Escribí BORRAR para confirmar</label><input id="borrar-ok" class="input" autocomplete="off"></div>
+      <button class="btn btn-bad" data-act="borrar">Borrar</button>
+      <div id="borrar-res" class="stack"></div>
+    </div>` : ''}`;
 }
 
 function pintarTablero() {
@@ -723,6 +736,12 @@ async function analizarImportacion(file) {
   try {
     const leido = await leerArchivo(file);
     const m = mapearPersonas(leido);
+    const pareceePadron = m.columnas.includes('mesa') && m.columnas.includes('orden') && m.validas.length > 500;
+    if (pareceePadron || m.validas.length > 3000) {
+      $('#imp-file').value = '';
+      res.innerHTML = `<div class="aviso warn">${ic('alerta', 18)}<span>Este archivo tiene ${m.validas.length.toLocaleString('es-AR')} personas${pareceePadron ? ' con mesa y número de orden: parece un padrón' : ''}. ${puedePadron() ? 'Subilo más abajo, en la sección <b>Padrón</b>.' : 'El padrón lo sube una cabeza o un encargado de circuito.'} Acá van solo las listas de gente de cada equipo (hasta 3.000 por archivo).</span></div>`;
+      return;
+    }
     res.innerHTML = `<div class="muted">Revisando ${m.validas.length} personas contra el padrón y la base…</div><div class="progreso"><i id="imp-prog"></i></div>`;
     const nuevas = []; const propias = []; const ocupadas = [];
     let delPadron = 0; let noPadron = 0; let i = 0;
@@ -892,6 +911,21 @@ const acciones = {
   },
   'conf-si': async (el) => { const c = st.conflictos.find((x) => x.id === el.dataset.id); try { await S.resolverConflicto(c, true); toast(`Pasada a ${c.byNombre}`); } catch (e) { toast(mensajeError(e)); } },
   'conf-no': async (el) => { const c = st.conflictos.find((x) => x.id === el.dataset.id); try { await S.resolverConflicto(c, false); toast('Queda como estaba'); } catch (e) { toast(mensajeError(e)); } },
+  borrar: async () => {
+    const que = $('#borrar-que').value;
+    const res = $('#borrar-res');
+    if ($('#borrar-ok').value.trim().toUpperCase() !== 'BORRAR') { res.innerHTML = '<div class="error">Escribí BORRAR para confirmar.</div>'; return; }
+    const dnis = st.personas.map((p) => p.dni);
+    res.innerHTML = '<div class="muted" id="borrar-txt">Borrando…</div><div class="progreso"><i id="borrar-prog"></i></div>';
+    const prog = (h, t) => { const b = $('#borrar-prog'); if (b) b.style.width = pct(h, t) + '%'; const x = $('#borrar-txt'); if (x) x.textContent = `Borrando ${h.toLocaleString('es-AR')} de ${t.toLocaleString('es-AR')}…`; };
+    try {
+      if (que === 'personas') await S.borrarPersonas(dnis, prog); else await S.borrarPadron(prog);
+      $('#borrar-ok').value = '';
+      res.innerHTML = `<div class="aviso ok">${ic('ok', 18)}<span>${que === 'personas' ? `Listo: se borraron ${dnis.length.toLocaleString('es-AR')} personas.` : 'Listo: se borró el padrón.'}</span></div>`;
+    } catch (e) {
+      res.innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>${esc(mensajeError(e))}. Si cortó a la mitad, tocá Borrar de nuevo.</span></div>`;
+    }
+  },
   'imp-confirmar': confirmarImportacion,
   'pad-confirmar': confirmarPadron,
   exportar: async () => {

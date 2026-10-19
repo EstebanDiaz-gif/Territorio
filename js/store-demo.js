@@ -160,6 +160,17 @@ export async function eliminarPersona(dni) {
   if (p && visiblePersona(p)) { delete db.personas[dni]; guardar(); }
 }
 
+export async function borrarPersonas(dnis, onProgreso) {
+  dnis.forEach((d) => delete db.personas[d]);
+  guardar();
+  onProgreso?.(dnis.length, dnis.length);
+}
+export async function borrarPadron(onProgreso) {
+  db.padron = {};
+  guardar();
+  onProgreso?.(1, 1);
+}
+
 // ---------- Conflictos (intentos de cargar gente de otro) ----------
 function registrarConflicto(dni) {
   const id = 'c' + Math.random().toString(36).slice(2, 9);

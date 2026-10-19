@@ -198,6 +198,26 @@ export async function duenoDe(dni) {
   return s.exists() ? { nombre: s.data().nombre, ownerNombre: s.data().ownerNombre } : null;
 }
 
+// ---------- Borrado masivo (solo cabezas) ----------
+async function borrarEnTandas(refs, onProgreso) {
+  let hechos = 0;
+  for (let i = 0; i < refs.length; i += 400) {
+    const b = writeBatch(db);
+    refs.slice(i, i + 400).forEach((r) => b.delete(r));
+    await b.commit();
+    hechos += refs.slice(i, i + 400).length;
+    onProgreso?.(hechos, refs.length);
+  }
+}
+export function borrarPersonas(dnis, onProgreso) {
+  return borrarEnTandas(dnis.map((d) => D('personas', d)), onProgreso);
+}
+export async function borrarPadron(onProgreso) {
+  const refs = Array.from({ length: 1000 }, (_, i) => D('padron', String(i).padStart(3, '0')));
+  await borrarEnTandas(refs, onProgreso);
+  baldes.clear();
+}
+
 export async function contarPersonas() {
   const r = await getCountFromServer(deMiEquipo('personas'));
   return r.data().count;
