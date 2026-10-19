@@ -281,7 +281,15 @@ function pintarLogin() {
     ${DEMO ? '' : '<button class="btn btn-ghost" type="button" data-act="ir-crear">Crear una campaña nueva</button>'}
   </div>`;
 }
-const marca = () => `<div class="marca"><div class="logo">${ic('logo', 30)}</div><div><b>${esc(APP_NAME)}</b><div class="muted">Tu equipo y tu gente, el día de la elección</div></div></div>`;
+// Isotipo de la marca: nueve manzanas que forman una T; la de abajo, en verde, es la persona que llegó a votar
+function isotipo(tam = 32, fondo = 'oscuro') {
+  const lleno = fondo === 'oscuro' ? '#FFFFFF' : '#14213D';
+  const verde = fondo === 'oscuro' ? '#7FE0B4' : '#0E8A57';
+  const celdas = [[0, 0, 1], [17, 0, 1], [34, 0, 1], [0, 17, 0], [17, 17, 1], [34, 17, 0], [0, 34, 0], [17, 34, 2], [34, 34, 0]];
+  return `<svg width="${tam}" height="${tam}" viewBox="0 0 48 48" aria-hidden="true">${celdas.map(([x, y, t]) =>
+    `<rect x="${x}" y="${y}" width="14" height="14" rx="3" fill="${t === 2 ? verde : lleno}"${t === 0 ? ' fill-opacity="0.18"' : ''}/>`).join('')}</svg>`;
+}
+const marca = () => `<div class="marca"><div class="logo">${isotipo(32)}</div><div><b>${esc(APP_NAME)}</b><div class="muted">Tu equipo y tu gente, el día de la elección</div></div></div>`;
 
 // ---------------------------------------------------------------- estructura
 function tabsDisponibles() {
@@ -350,6 +358,7 @@ function pintarTop() {
   }
   $('#top').innerHTML = `
     <div class="top-row">
+      <span class="top-logo">${isotipo(26)}</span>
       <div class="top-titulo"><div class="top-sub">${sub}</div><h1>${titulos[st.tab]}</h1></div>
       <button type="button" class="avatar" data-act="cuenta" aria-label="Mi cuenta">${esc(iniciales(me.nombre))}</button>
     </div>${extra}`;
@@ -1165,6 +1174,7 @@ function pintarFiscal() {
   $('#app').innerHTML = `
     ${DEMO ? '<div class="demo-band">Modo demostración · los datos son inventados</div>' : ''}
     <header class="top"><div class="top-row">
+      <span class="top-logo">${isotipo(26)}</span>
       <div class="top-titulo"><div class="top-sub">Fiscal · ${esc(me.campania || '')}</div><h1>Mi mesa</h1></div>
       <button type="button" class="avatar" data-act="cuenta" aria-label="Mi cuenta">${esc(iniciales(me.nombre))}</button>
     </div></header>

@@ -1,6 +1,6 @@
 /* Territorio — app de campaña. Layout: una columna de celular, barra inferior fija. */
 :root {
-  --bg: #F2F4F7;
+  --bg: #F3F4EF;
   --surface: #FFFFFF;
   --ink: #14213D;
   --ink-2: #3E4A5C;
@@ -11,9 +11,11 @@
   --brand-2: #233358;
   --on-brand: #FFFFFF;
   --on-brand-2: #C9D3E6;
-  --accent: #1F5BD6;
-  --accent-ink: #14408F;
-  --accent-soft: #EAF0FC;
+  --accent: #0E8A57;
+  --accent-ink: #0B6447;
+  --accent-soft: #D7F5E7;
+  --verde-claro: #7FE0B4;
+  --ambar: #F2A33A;
   --ok-bg: #E3F4EC; --ok: #0B6447;
   --warn-bg: #FDEFE3; --warn: #8A3D07;
   --bad-bg: #FDECEA; --bad: #A0261A; --bad-line: #F3C6C1;
@@ -30,7 +32,7 @@
     --bg: #0E1422; --surface: #172033; --ink: #E8EDF6; --ink-2: #C3CCDB; --muted: #98A3B6;
     --line: #2A3650; --line-2: #222D44; --brand: #0A1020; --brand-2: #1C2740;
     --on-brand: #FFFFFF; --on-brand-2: #AFBBD2;
-    --accent: #5C8EF5; --accent-ink: #9DBBFA; --accent-soft: #1D2D52;
+    --accent: #0E8A57; --accent-ink: #7FE0B4; --accent-soft: #12352A;
     --ok-bg: #12352A; --ok: #7FE0B4; --warn-bg: #3A2614; --warn: #FFC58A;
     --bad-bg: #3B1A18; --bad: #FFADA3; --bad-line: #5C2A25; --neutral-bg: #222D44; --neutral: #C3CCDB;
     --wa: #6FD3A8; --shadow: 0 8px 24px rgba(0, 0, 0, .4);
@@ -41,7 +43,7 @@
   --bg: #0E1422; --surface: #172033; --ink: #E8EDF6; --ink-2: #C3CCDB; --muted: #98A3B6;
   --line: #2A3650; --line-2: #222D44; --brand: #0A1020; --brand-2: #1C2740;
   --on-brand: #FFFFFF; --on-brand-2: #AFBBD2;
-  --accent: #5C8EF5; --accent-ink: #9DBBFA; --accent-soft: #1D2D52;
+  --accent: #0E8A57; --accent-ink: #7FE0B4; --accent-soft: #12352A;
   --ok-bg: #12352A; --ok: #7FE0B4; --warn-bg: #3A2614; --warn: #FFC58A;
   --bad-bg: #3B1A18; --bad: #FFADA3; --bad-line: #5C2A25; --neutral-bg: #222D44; --neutral: #C3CCDB;
   --wa: #6FD3A8; --shadow: 0 8px 24px rgba(0, 0, 0, .4);
@@ -213,7 +215,7 @@ nav.tabs button {
   border: 0; background: transparent; color: var(--muted); font-size: 11.5px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 3px; position: relative;
 }
-nav.tabs button[aria-current="page"] { color: var(--accent); font-weight: 700; }
+nav.tabs button[aria-current="page"] { color: var(--accent-ink); font-weight: 700; }
 .badge { position: absolute; top: 8px; left: calc(50% + 6px); background: var(--bad); color: #fff; font-size: 10.5px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: grid; place-items: center; padding: 0 4px; }
 
 /* Hoja inferior */
@@ -237,8 +239,10 @@ nav.tabs button[aria-current="page"] { color: var(--accent); font-weight: 700; }
 .login { min-height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 18px;
   padding: calc(24px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) 24px max(20px, env(safe-area-inset-left, 0px)); }
 .marca { display: flex; align-items: center; gap: 12px; }
-.marca .logo { width: 52px; height: 52px; border-radius: 15px; background: var(--accent); display: grid; place-items: center; color: #fff; }
-.marca b { font: 800 28px/1 var(--f-display); }
+.marca .logo { width: 56px; height: 56px; border-radius: 15px; background: #14213D; display: grid; place-items: center; flex: none; }
+.marca b { font: 800 28px/1 var(--f-display); text-transform: uppercase; letter-spacing: 2.5px; }
+.top-logo { flex: none; display: grid; place-items: center; margin-right: 2px; }
+.top-logo svg { display: block; }
 .demo-roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .demo-roles button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 10px 12px; min-height: 64px; }
 .demo-roles b { display: block; font-size: 14px; }

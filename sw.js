@@ -1,10 +1,10 @@
 // Guarda la app en el celular para que abra sin señal.
 // Cada vez que publiques cambios, subí el número de VERSION.
-const VERSION = 'territorio-v15';
+const VERSION = 'territorio-v16';
 const ARCHIVOS = [
   './', './index.html', './manifest.json', './css/app.css',
   './js/app.js', './js/config.js', './js/roles.js', './js/importers.js', './js/store-demo.js', './js/store-firebase.js',
-  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'
+  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (e) => {
