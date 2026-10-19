@@ -1,6 +1,6 @@
 // MODO DEMO: misma interfaz que store-firebase.js, pero todo se guarda en este navegador.
 // Sirve para mostrar y probar la app sin configurar nada. Los datos son inventados.
-import { bucketDe, padronAString, padronDeString, nivel, idLista } from './roles.js';
+import { bucketDe, padronAString, padronDeString, nivel, idLista, palabrasDe } from './roles.js';
 
 export const modo = 'demo';
 const KEY = 'territorio-demo-v5';
@@ -159,7 +159,7 @@ export async function cargarPersona(datos, dueno = me) {
   if (me.rol !== 'cabeza' && !dueno.path.includes(me.uid)) throw err('permission-denied', 'Solo podés asignar a gente de tu equipo');
   db.personas[datos.dni] = {
     estado: 'sin', tipo: 'votante', tel: '', nota: '', revisar: false,
-    ...datos,
+    ...datos, palabras: palabrasDe(datos.nombre),
     ownerId: dueno.uid, ownerNombre: dueno.nombre, path: dueno.path,
     voto: false, creadoAt: ahora(), creadoPor: me.uid
   };
@@ -231,6 +231,25 @@ export async function duenoDe(dni) {
   const p = db.personas[dni];
   return me.rol === 'cabeza' && p ? { nombre: p.nombre, ownerNombre: p.ownerNombre } : null;
 }
+
+// ---------- Consultas para campañas grandes ----------
+function cumple(p, filtros) {
+  return filtros.every(([c, o, v]) => {
+    const x = c === 'palabras' ? (p.palabras || palabrasDe(p.nombre)) : p[c];
+    if (o === '==') return x === v;
+    if (o === 'array-contains') return Array.isArray(x) && x.includes(v);
+    if (o === 'in') return v.includes(x);
+    return true;
+  });
+}
+const visibles = (filtros) => Object.values(db.personas).filter((p) => visiblePersona(p) && cumple(p, filtros || [])).sort((a, b) => a.dni.localeCompare(b.dni));
+export async function contar(filtros) { await espera(60); return visibles(filtros).length; }
+export function watchPersonasConsulta(filtros, lim, cb) {
+  const f = () => cb(lim ? visibles(filtros).slice(0, lim) : visibles(filtros));
+  subs.add(f); f();
+  return () => subs.delete(f);
+}
+export async function listarPersonas(filtros = [], lim = 0) { await espera(60); const r = visibles(filtros); return lim ? r.slice(0, lim) : r; }
 
 // ---------- Fiscalización ----------
 export async function leerListas() { return { listas: db.campania.listas || [], categorias: db.campania.categorias || [] }; }

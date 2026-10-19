@@ -69,3 +69,8 @@ export function idLista(nombre) {
   for (const ch of String(nombre).trim().toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return 'l' + h.toString(36);
 }
+
+// Palabras del nombre (sin acentos, en minúscula) para poder buscar en el servidor
+export function palabrasDe(nombre) {
+  return [...new Set(String(nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-zñ0-9]+/).filter((w) => w.length >= 2))].slice(0, 12);
+}

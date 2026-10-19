@@ -1,6 +1,6 @@
 // Datos reales en Firebase (Auth + Firestore). Misma interfaz que store-demo.js.
 import { FIREBASE_CONFIG, EMAIL_DOMAIN } from './config.js';
-import { bucketDe, padronAString, padronDeString } from './roles.js';
+import { bucketDe, padronAString, padronDeString, palabrasDe } from './roles.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged
@@ -8,7 +8,7 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore,
   doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where, onSnapshot,
-  writeBatch, serverTimestamp, getCountFromServer, getDocs, arrayUnion
+  writeBatch, serverTimestamp, getCountFromServer, getDocs, arrayUnion, limit
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 export const modo = 'firebase';
@@ -208,7 +208,7 @@ export async function cargarPersona(datos, dueno = me) {
   if (c.estado === 'ocupada') return { conflicto: true, id: await registrarConflicto(datos.dni) };
   const p = {
     estado: 'sin', tipo: 'votante', tel: '', nota: '', revisar: false,
-    ...datos,
+    ...datos, palabras: palabrasDe(datos.nombre),
     ownerId: dueno.uid, ownerNombre: dueno.nombre, path: dueno.path,
     voto: false, creadoAt: serverTimestamp(), creadoPor: me.uid
   };
@@ -316,4 +316,24 @@ export function guardarActa(fid, img, path) {
 export async function leerActa(fid) {
   const s = await getDoc(D('actas', fid));
   return s.exists() ? s.data().img : null;
+}
+
+// ---------- Consultas para campañas grandes (la cabeza no baja a toda la gente) ----------
+// filtros: [[campo, operador, valor], ...] con operadores '==', 'array-contains', 'in'
+function consulta(filtros = [], lim = 0) {
+  const ws = filtros.map(([c, o, v]) => where(c, o, v));
+  if (me.rol !== 'cabeza' && !filtros.some(([c, o]) => c === 'path' && o === 'array-contains')) ws.unshift(where('path', 'array-contains', me.uid));
+  if (lim) ws.push(limit(lim));
+  return query(C('personas'), ...ws);
+}
+export async function contar(filtros) {
+  const r = await getCountFromServer(consulta(filtros));
+  return r.data().count;
+}
+export function watchPersonasConsulta(filtros, lim, cb, alError) {
+  return onSnapshot(consulta(filtros, lim), (s) => cb(s.docs.map((d) => d.data())), (e) => { console.error(e); alError?.(e); });
+}
+export async function listarPersonas(filtros = [], lim = 0) {
+  const s = await getDocs(consulta(filtros, lim));
+  return s.docs.map((d) => d.data());
 }

@@ -1,7 +1,7 @@
 import { APP_NAME, FIREBASE_CONFIG, ZONA } from './config.js';
 import {
   ROLES, ROL_LABEL, ROL_CORTO, nivel, rolAbajo, ESTADOS, ESTADO_LABEL, TIPOS, TIPO_LABEL,
-  normDni, dniValido, fmtDni, telWhatsApp, idLista
+  normDni, dniValido, fmtDni, telWhatsApp, idLista, palabrasDe
 } from './roles.js';
 import { leerArchivo, mapearPersonas, mapearPadron, exportarExcel, NOMBRE_COLUMNA } from './importers.js';
 
@@ -42,6 +42,103 @@ const puedePadron = () => st.me.rol === 'cabeza';
 const usuarioPorId = (uid) => st.usuarios.find((u) => u.uid === uid);
 const miEquipo = () => st.usuarios.filter((u) => u.uid !== st.me.uid && u.rol !== 'fiscal' && (st.me.rol === 'cabeza' || u.path.includes(st.me.uid)));
 const pausa = (t) => new Promise((r) => setTimeout(r, t));
+
+// ---------------------------------------------------------------- modo liviano (cabeza)
+// La cabeza no baja a toda la gente: los números los cuenta el servidor y las listas llegan por partes.
+const liviano = () => st.me?.rol === 'cabeza';
+const cachePersonas = new Map();
+const recordar = (ps) => { for (const p of ps) cachePersonas.set(p.dni, p); return ps; };
+const personaLocal = (dni) => st.personas.find((x) => x.dni === dni) || cachePersonas.get(dni);
+const conteos = {}; const pidiendo = {};
+let tRefresco = null;
+const programarRefresco = () => { clearTimeout(tRefresco); tRefresco = setTimeout(() => refrescar(), 150); };
+const invalidarConteos = () => { for (const k in conteos) conteos[k].t = 0; };
+function conteo(clave, filtros) {
+  const c = conteos[clave];
+  if ((!c || Date.now() - c.t > 45000) && !pidiendo[clave]) {
+    pidiendo[clave] = true;
+    S.contar(filtros).then((n) => { conteos[clave] = { n, t: Date.now() }; programarRefresco(); })
+      .catch((e) => { console.error('conteo', clave, e); conteos[clave] = { n: c?.n ?? null, t: Date.now() }; })
+      .finally(() => { delete pidiendo[clave]; });
+  }
+  return c ? c.n : null;
+}
+const fmtN = (n) => (n == null ? '…' : Number(n).toLocaleString('es-AR'));
+function statsGlobal() {
+  if (!liviano()) return stats(st.personas);
+  return {
+    total: conteo('total', []), conf: conteo('conf', [['estado', '==', 'confirmado']]), tras: conteo('tras', [['estado', '==', 'traslado']]),
+    voto: conteo('voto', [['voto', '==', true]]), rev: conteo('rev', [['revisar', '==', true]]),
+    fisc: conteo('fisc', [['tipo', 'in', ['fiscal', 'fiscal_suplente']]]), trasPend: conteo('trasPend', [['estado', '==', 'traslado'], ['voto', '==', false]])
+  };
+}
+// [cargados, votaron] de alguien y todo su equipo
+const contU = (cont, uid) => (liviano() ? [conteo('u' + uid, [['path', 'array-contains', uid]]), conteo('uv' + uid, [['path', 'array-contains', uid], ['voto', '==', true]])] : (cont[uid] || [0, 0]));
+async function actualizarPersonaApp(dni, cambios) {
+  const r = await S.actualizarPersona(dni, cambios);
+  const p = personaLocal(dni); if (p) Object.assign(p, cambios);
+  invalidarConteos(); programarRefresco();
+  return r;
+}
+function filtrosGente() {
+  const f = []; const e = st.f.estado;
+  if (e === 'fiscal') f.push(['tipo', 'in', ['fiscal', 'fiscal_suplente']]);
+  else if (e === 'revisar') f.push(['revisar', '==', true]);
+  else if (e !== 'todos') f.push(['estado', '==', e]);
+  const q = st.f.q.trim(); const qd = normDni(q);
+  if (qd.length >= 7 && /^[\d.\s]+$/.test(q)) f.push(['dni', '==', qd]);
+  else if (q.length >= 2) { const w = palabrasDe(q)[0]; if (w) f.push(['palabras', 'array-contains', w]); }
+  if (st.f.de && !f.some((x) => x[1] === 'array-contains')) f.push(['path', 'array-contains', st.f.de]);
+  return f;
+}
+// Qué parte de la gente tiene que estar en pantalla según la sección
+function suscribirPagina() {
+  if (!liviano()) return;
+  let filtros = null; let lim = 0;
+  if (st.tab === 'gente') { filtros = filtrosGente(); lim = st.f.limite; }
+  if (st.tab === 'dia') { filtros = [['estado', '==', 'traslado'], ['voto', '==', false]]; lim = 50; }
+  const clave = filtros ? JSON.stringify([filtros, lim]) : '';
+  if (clave === st.clavePagina && st.unsubPagina) return;
+  st.unsubPagina?.(); st.clavePagina = clave;
+  if (!filtros) { st.personas = []; st.unsubPagina = null; return; }
+  st.cargandoPagina = true;
+  st.unsubPagina = S.watchPersonasConsulta(filtros, lim, (x) => { st.cargandoPagina = false; st.personas = recordar(x); refrescar(); },
+    (e) => { st.cargandoPagina = false; st.errorPagina = mensajeError(e); refrescar(); });
+}
+const genteDe = {}; // uid -> {lista, t} (gente cargada por un movilizador, para el árbol del equipo)
+function genteDeUsuario(uid) {
+  if (!liviano()) return st.personas.filter((p) => p.ownerId === uid);
+  const g = genteDe[uid];
+  if ((!g || Date.now() - g.t > 45000) && !pidiendo['o' + uid]) {
+    pidiendo['o' + uid] = true;
+    S.listarPersonas([['ownerId', '==', uid]], 31).then((x) => { genteDe[uid] = { lista: recordar(x), t: Date.now() }; programarRefresco(); })
+      .catch((e) => console.error(e)).finally(() => { delete pidiendo['o' + uid]; });
+  }
+  return g ? g.lista : null;
+}
+let fiscPers = null; let fiscT = 0;
+function personasFiscales() {
+  if (!liviano()) return st.personas.filter((p) => p.tipo && p.tipo !== 'votante');
+  if (Date.now() - fiscT > 45000 && !pidiendo.fisc) {
+    pidiendo.fisc = true; fiscT = Date.now();
+    S.listarPersonas([['tipo', 'in', ['fiscal', 'fiscal_suplente']]], 2000).then((x) => { fiscPers = recordar(x); programarRefresco(); })
+      .catch((e) => console.error(e)).finally(() => { delete pidiendo.fisc; });
+  }
+  return fiscPers || [];
+}
+const pidiendoDni = new Set();
+function personaPorDni(dni) {
+  const p = personaLocal(dni);
+  if (p || !liviano() || pidiendoDni.has(dni)) return p;
+  pidiendoDni.add(dni);
+  S.listarPersonas([['dni', '==', dni]], 1).then((x) => { if (x.length) { recordar(x); programarRefresco(); } }).catch(() => {});
+  return null;
+}
+// Toda la gente, solo cuando hace falta (borrar, exportar)
+const todaLaGente = (filtros = []) => (liviano() ? S.listarPersonas(filtros) : Promise.resolve(st.personas.filter((p) => filtros.every(([c, , v]) => p[c] === v))));
+let tPagina = null;
+const resuscribir = () => { clearTimeout(tPagina); tPagina = setTimeout(suscribirPagina, 300); };
+setInterval(() => { if (st.me && liviano() && document.visibilityState === 'visible') { invalidarConteos(); refrescar(); } }, 45000);
 
 function mensajeError(e) {
   const c = e?.code || '';
@@ -123,7 +220,7 @@ function iniciarSesion(me) {
     ? [S.watchFiscalias((x) => { st.fiscalias = x; refrescar(); })]
     : [
       S.watchUsuarios((x) => { st.usuarios = x; refrescar(); }),
-      S.watchPersonas((x) => { st.personas = x; refrescar(); }),
+      ...(me.rol === 'cabeza' ? [] : [S.watchPersonas((x) => { st.personas = x; refrescar(); })]),
       S.watchConflictos((x) => { st.conflictos = x; refrescar(); }),
       S.watchFiscalias((x) => { st.fiscalias = x; refrescar(); })
     ];
@@ -132,6 +229,8 @@ function iniciarSesion(me) {
 
 async function salir() {
   st.unsubs.forEach((u) => u()); st.unsubs = [];
+  st.unsubPagina?.(); st.unsubPagina = null; st.clavePagina = null; cachePersonas.clear();
+  for (const k in conteos) delete conteos[k];
   await S.logout();
   st.me = null; st.usuarios = []; st.personas = []; st.conflictos = [];
   cerrarHoja();
@@ -200,6 +299,8 @@ function pintar() {
     <nav class="tabs" aria-label="Secciones"><div class="in" id="nav"></div></nav>`;
   pintarNav();
   pintarTop();
+  if (liviano()) { const viejo = Date.now() - 10000; for (const k in conteos) if (conteos[k].t < viejo) conteos[k].t = 0; }
+  suscribirPagina();
   const v = { gente: vistaGente, cargar: vistaCargar, dia: vistaDia, equipo: vistaEquipo, panel: vistaPanel }[st.tab];
   $('#main').innerHTML = v();
   refrescarPartes();
@@ -228,21 +329,21 @@ function stats(lista) {
 
 function pintarTop() {
   const me = st.me;
-  const s = stats(st.personas);
+  const s = statsGlobal();
   const titulos = { gente: esMov() ? 'Mi gente' : 'Gente del equipo', cargar: 'Cargar persona', dia: 'Día de elección', equipo: 'Equipo', panel: 'Panel' };
   const sub = `${ROL_LABEL[me.rol]}${me.circuito ? ' · Circuito ' + esc(me.circuito) : ''} · ${esc(me.campania || '')}`;
   let extra = '';
   if (st.tab === 'gente') {
     extra = `<div class="kpis">
-      <div class="kpi"><b>${s.total}</b><span>cargados</span></div>
-      <div class="kpi"><b class="v-ok">${s.conf}</b><span>confirm.</span></div>
-      <div class="kpi"><b class="v-warn">${s.tras}</b><span>traslado</span></div>
-      <div class="kpi"><b>${s.voto}</b><span>votaron</span></div>
+      <div class="kpi"><b>${fmtN(s.total)}</b><span>cargados</span></div>
+      <div class="kpi"><b class="v-ok">${fmtN(s.conf)}</b><span>confirm.</span></div>
+      <div class="kpi"><b class="v-warn">${fmtN(s.tras)}</b><span>traslado</span></div>
+      <div class="kpi"><b>${fmtN(s.voto)}</b><span>votaron</span></div>
     </div>`;
   } else if (st.tab === 'dia') {
     extra = `<div class="row" style="justify-content:space-between;align-items:baseline">
         <span class="top-sub">Ya votaron</span>
-        <span><b class="num" style="font:800 28px/1 var(--f-display)">${s.voto}</b><span class="top-sub"> de ${s.total} · ${pct(s.voto, s.total)}%</span></span>
+        <span><b class="num" style="font:800 28px/1 var(--f-display)">${fmtN(s.voto)}</b><span class="top-sub"> de ${fmtN(s.total)} · ${pct(s.voto, s.total)}%</span></span>
       </div>
       <div class="barra-voto" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct(s.voto, s.total)}" aria-label="Porcentaje que ya votó"><i style="width:${pct(s.voto, s.total)}%"></i></div>`;
   }
@@ -322,6 +423,15 @@ function pintarLista() {
   const el = $('#lista');
   if (!el) return;
   const lista = filtrarGente();
+  if (liviano()) {
+    if (st.errorPagina) { el.innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>${esc(st.errorPagina)}</span></div>`; st.errorPagina = null; return; }
+    if (st.cargandoPagina && !st.personas.length) { el.innerHTML = '<div class="vacio">Buscando…</div>'; return; }
+    const total = conteo('g' + JSON.stringify(filtrosGente()), filtrosGente());
+    if (!lista.length) { el.innerHTML = `<div class="vacio">${st.f.q || st.f.estado !== 'todos' || st.f.de ? 'No hay nadie con ese filtro.' : 'Todavía no hay gente cargada.'}${st.f.q && !/^[\d.\s]+$/.test(st.f.q) ? '<div class="small" style="margin-top:6px">Buscá por apellido o nombre completo, o por DNI.</div>' : ''}</div>`; return; }
+    el.innerHTML = lista.map(tarjetaPersona).join('') +
+      (st.personas.length >= st.f.limite ? `<button class="btn btn-sec mas" data-act="mas">Ver más${total != null ? ` (son ${fmtN(total)})` : ''}</button>` : `<div class="muted small" style="text-align:center">${lista.length} ${lista.length === 1 ? 'persona' : 'personas'}</div>`);
+    return;
+  }
   if (!st.personas.length) {
     el.innerHTML = `<div class="card vacio stack"><h3>Todavía no cargaste a nadie</h3><div>Tocá <b>Cargar</b> y escribí el DNI: los datos de dónde vota se completan solos.</div><button class="btn" data-act="tab" data-tab="cargar">${ic('mas')} Cargar persona</button></div>`;
     return;
@@ -332,7 +442,7 @@ function pintarLista() {
 }
 
 function hojaPersona(dni, confirmarBorrado = false) {
-  const p = st.personas.find((x) => x.dni === dni);
+  const p = personaLocal(dni);
   if (!p) { cerrarHoja(); return; }
   const destinos = esMov() ? [] : [st.me, ...miEquipo()].filter((u) => u.uid !== p.ownerId);
   const wa = waUrl(p.tel, textoRecordatorio(p));
@@ -521,6 +631,7 @@ function vistaDia() { return '<div id="dia" class="stack"></div>'; }
 function pintarDia() {
   const el = $('#dia');
   if (!el) return;
+  if (liviano()) { pintarDiaCabeza(el); return; }
   const s = stats(st.personas);
   const traslados = st.personas.filter((p) => p.estado === 'traslado' && !p.voto);
   const lista = st.personas.filter((p) => st.dia.solo === 'todos' || !p.voto);
@@ -557,6 +668,32 @@ function pintarDia() {
     }).join('')}`;
 }
 
+function htmlTraslados(traslados, total) {
+  if (!total) return '';
+  return `<div class="card">
+      <div class="escuela-h"><span style="color:var(--warn)">${ic('auto', 22)}</span><div class="grow"><h3>${fmtN(total)} ${total === 1 ? 'traslado pendiente' : 'traslados pendientes'}</h3><div class="muted small">Necesitan que los lleven a votar</div></div></div>
+      ${traslados.slice(0, 8).map((p) => `<div class="votante"><div class="grow"><div style="font-weight:600">${esc(p.nombre)}</div><div class="muted small">${esc(p.domicilio || p.escuela || '')}</div></div>
+        ${p.tel ? `<a class="icon-btn wa" href="${waUrl(p.tel, 'Hola ' + primerNombre(p.nombre) + '! Te pasamos a buscar para ir a votar. ¿A qué hora te queda bien?')}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(p.nombre)}">${ic('wa')}</a>` : ''}</div>`).join('')}
+      ${total > 8 ? `<div class="votante muted small">y ${fmtN(total - 8)} más (filtrá por "Traslado" en Gente)</div>` : ''}
+    </div>`;
+}
+
+// La cabeza ve el día de la elección en números; marcar votos lo hace cada equipo con su gente
+function pintarDiaCabeza(el) {
+  cargarResumen();
+  const s = statsGlobal();
+  const falta = s.total != null && s.voto != null ? s.total - s.voto : null;
+  el.innerHTML = `
+    <div class="card pad stack">
+      <div class="row" style="justify-content:space-between"><h3>Avance de la votación</h3><b class="num">${pct(s.voto, s.total)}%</b></div>
+      <div class="bar"><i style="width:${pct(s.voto, s.total)}%"></i></div>
+      <div class="row small num" style="justify-content:space-between"><span><b>${fmtN(s.voto)}</b> votaron</span><span><b>${fmtN(falta)}</b> faltan</span><span><b>${fmtN(s.total)}</b> cargados</span></div>
+      <div class="muted small">Se actualiza solo. Cada movilizador marca a su gente en su celular; si querés marcar a alguien, buscalo en Gente.</div>
+    </div>
+    ${htmlTraslados(st.personas.filter((p) => p.estado === 'traslado' && !p.voto), s.trasPend)}
+    ${bloqueCircuitos({})}`;
+}
+
 // ---------------------------------------------------------------- EQUIPO
 function ordenarArbol(usuarios) {
   const hijos = {};
@@ -591,7 +728,7 @@ function vistaEquipo() {
 function pintarEquipo() {
   const el = $('#equipo');
   if (!el) return;
-  const cont = conteoPorUsuario();
+  const cont = liviano() ? {} : conteoPorUsuario();
   const visibles = (st.me.rol === 'cabeza' ? st.usuarios : st.usuarios.filter((u) => u.path.includes(st.me.uid))).filter((u) => u.rol !== 'fiscal');
   const ids = new Set(visibles.map((u) => u.uid));
   const hijos = {};
@@ -607,7 +744,7 @@ function pintarEquipo() {
     return;
   }
   const fila = (u, prof) => {
-    const [n, v] = cont[u.uid] || [0, 0];
+    const [n, v] = contU(cont, u.uid);
     const subs = hijos[u.uid] || [];
     const abierto = st.abiertos.has(u.uid);
     const wa = waUrl(u.tel);
@@ -619,7 +756,7 @@ function pintarEquipo() {
         <span class="ini rol-${u.rol}">${esc(iniciales(u.nombre))}</span>
         <span class="grow" style="text-align:left"><span style="display:block;font-weight:700">${esc(u.nombre)}${u.uid === st.me.uid ? ' <span class="muted">(vos)</span>' : ''}</span>
           <span class="muted small" style="display:block">${ROL_CORTO[u.rol]}${u.circuito ? ' · Circ. ' + esc(u.circuito) : ''}${detalle ? ' · ' + detalle : ''}</span>
-          <span class="small num" style="display:block"><b>${n}</b> cargados · <b>${v}</b> votaron${n ? ` · ${pct(v, n)}%` : ''}</span></span>
+          <span class="small num" style="display:block"><b>${fmtN(n)}</b> cargados · <b>${fmtN(v)}</b> votaron${n ? ` · ${pct(v, n)}%` : ''}</span></span>
       </button>
       ${wa && u.uid !== st.me.uid ? `<a class="icon-btn wa" href="${wa}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(u.nombre)}">${ic('wa')}</a>` : ''}
       ${u.uid !== st.me.uid ? `<button type="button" class="icon-btn" data-act="eq-opciones" data-uid="${u.uid}" aria-label="Opciones de ${esc(u.nombre)}: agregar a su equipo o quitar">${ic('mas3')}</button>` : ''}
@@ -627,13 +764,15 @@ function pintarEquipo() {
     if (!abierto) return html;
     if (subs.length) return html + subs.map((h) => fila(h, prof + 1)).join('');
     // Sin equipo debajo: mostramos su gente
-    const gente = st.personas.filter((p) => p.ownerId === u.uid).sort((a, b) => String(a.nombre).localeCompare(b.nombre));
+    const g0 = genteDeUsuario(u.uid);
     html += `<div class="gente-de" style="padding-left:${14 + prof * 8}px">`;
+    if (!g0) return html + '<div class="muted small">Cargando…</div></div>';
+    const gente = [...g0].sort((a, b) => String(a.nombre).localeCompare(b.nombre));
     if (!gente.length) html += '<div class="muted small">Todavía no cargó a nadie.</div>';
     html += gente.slice(0, 30).map((p) => `<button type="button" class="gente-item" data-act="ver" data-dni="${p.dni}">
         <span class="grow" style="text-align:left">${esc(p.nombre)}<span class="muted small" style="display:block">${p.escuela ? esc(p.escuela) + ' · ' : ''}${p.mesa ? 'Mesa ' + esc(p.mesa) : ''}</span></span>
         <span class="pill ${p.voto ? 'p-ok' : 'p-' + esc(p.estado)}">${p.voto ? 'Votó' : esc(ESTADO_LABEL[p.estado] || '')}</span></button>`).join('');
-    if (gente.length > 30) html += `<button type="button" class="btn btn-ghost btn-sm" data-act="eq-ver-gente" data-uid="${u.uid}">Ver las ${gente.length} personas</button>`;
+    if (gente.length > 30) html += `<button type="button" class="btn btn-ghost btn-sm" data-act="eq-ver-gente" data-uid="${u.uid}">Ver ${liviano() ? `las ${fmtN(n)}` : `las ${gente.length}`} personas</button>`;
     return html + '</div>';
   };
   el.innerHTML = `<div class="card">${raices.map((u) => fila(u, 0)).join('')}</div>
@@ -644,7 +783,8 @@ function hojaQuitarUsuario(uid) {
   const u = usuarioPorId(uid);
   if (!u) return;
   const debajo = st.usuarios.filter((x) => x.uid !== u.uid && x.path.includes(u.uid));
-  const gente = st.personas.filter((p) => p.ownerId === u.uid);
+  const nGente = liviano() ? conteo('o' + u.uid, [['ownerId', '==', u.uid]]) : st.personas.filter((p) => p.ownerId === u.uid).length;
+  if (nGente == null) { S.contar([['ownerId', '==', u.uid]]).then((n) => { conteos['o' + u.uid] = { n, t: Date.now() }; hojaQuitarUsuario(uid); }).catch((e) => toast(mensajeError(e))); return; }
   const destinos = [st.me, ...miEquipo()].filter((x) => x.uid !== u.uid && !x.path.includes(u.uid));
   abrirHoja(`
     <div class="row"><div class="ini rol-${u.rol}" style="width:48px;height:48px;border-radius:24px">${esc(iniciales(u.nombre))}</div>
@@ -655,7 +795,7 @@ function hojaQuitarUsuario(uid) {
     <div class="card pad stack">
       <h3>Quitar del equipo</h3>
       <div class="muted">Deja de poder entrar a la app. Si lo agregaste con un error (nombre, rol o superior equivocado), quitalo y volvé a agregarlo bien: puede usar el mismo DNI.</div>
-      ${gente.length ? `<div><label class="label" for="qu-destino">Sus ${gente.length} personas cargadas</label>
+      ${nGente ? `<div><label class="label" for="qu-destino">Sus ${fmtN(nGente)} personas cargadas</label>
         <select id="qu-destino" class="input">
           ${ordenarArbol(destinos).map((x) => `<option value="${x.uid}">Pasan a ${esc(x.nombre)}${x.uid === st.me.uid ? ' (vos)' : ' · ' + ROL_CORTO[x.rol]}</option>`).join('')}
           <option value="__borrar">Se borran</option>
@@ -757,7 +897,7 @@ function vistaPanel() {
         <div class="muted">No se puede deshacer.</div>
         <div><label class="label" for="borrar-que">Qué borrar</label>
           <select id="borrar-que" class="input">
-            <option value="personas">Toda la gente cargada (${st.personas.length.toLocaleString('es-AR')})</option>
+            <option value="personas">Toda la gente cargada (${fmtN(liviano() ? statsGlobal().total : st.personas.length)})</option>
             <option value="padron">El padrón</option>
           </select></div>
         <div><label class="label" for="borrar-ok">Escribí BORRAR para confirmar</label><input id="borrar-ok" class="input" autocomplete="off"></div>
@@ -769,28 +909,28 @@ function vistaPanel() {
 function pintarTablero() {
   const el = $('#tablero');
   if (!el) return;
-  const s = stats(st.personas);
+  const s = statsGlobal();
   const porCirc = {};
-  for (const p of st.personas) { const k = p.circuito || '–'; porCirc[k] ||= [0, 0]; porCirc[k][0]++; if (p.voto) porCirc[k][1]++; }
+  if (!liviano()) for (const p of st.personas) { const k = p.circuito || '–'; porCirc[k] ||= [0, 0]; porCirc[k][0]++; if (p.voto) porCirc[k][1]++; }
   const rolRanking = st.me.rol === 'cabeza' ? 'encargado' : rolAbajo(st.me.rol);
-  const cont = conteoPorUsuario();
+  const cont = liviano() ? {} : conteoPorUsuario();
   const ranking = st.usuarios.filter((u) => u.rol === rolRanking && (st.me.rol === 'cabeza' || u.parentId === st.me.uid))
-    .map((u) => ({ u, n: (cont[u.uid] || [0, 0])[0], v: (cont[u.uid] || [0, 0])[1] }))
-    .sort((a, b) => b.n - a.n);
+    .map((u) => { const [n, v] = contU(cont, u.uid); return { u, n, v }; })
+    .sort((a, b) => (b.n || 0) - (a.n || 0));
   el.innerHTML = `
     <div class="tiles">
-      <div class="tile t-acc"><b>${s.total.toLocaleString('es-AR')}</b><span>personas cargadas</span></div>
-      <div class="tile t-ok"><b>${pct(s.voto, s.total)}%</b><span>ya votó (${s.voto})</span></div>
-      <div class="tile t-ok"><b>${s.conf}</b><span>confirmados</span></div>
-      <div class="tile t-warn"><b>${s.trasPend}</b><span>traslados pendientes</span></div>
-      <div class="tile t-neutral"><b>${s.fisc}</b><span>fiscales</span></div>
-      <div class="tile ${s.rev ? 't-warn' : 't-neutral'}"><b>${s.rev}</b><span>con datos a revisar</span></div>
+      <div class="tile t-acc"><b>${fmtN(s.total)}</b><span>personas cargadas</span></div>
+      <div class="tile t-ok"><b>${pct(s.voto, s.total)}%</b><span>ya votó (${fmtN(s.voto)})</span></div>
+      <div class="tile t-ok"><b>${fmtN(s.conf)}</b><span>confirmados</span></div>
+      <div class="tile t-warn"><b>${fmtN(s.trasPend)}</b><span>traslados pendientes</span></div>
+      <div class="tile t-neutral"><b>${fmtN(s.fisc)}</b><span>fiscales</span></div>
+      <div class="tile ${s.rev ? 't-warn' : 't-neutral'}"><b>${fmtN(s.rev)}</b><span>con datos a revisar</span></div>
     </div>
     ${bloqueCircuitos(porCirc)}
     ${ranking.length ? `<div class="card"><div class="escuela-h"><h3 class="grow">${ROL_CORTO[rolRanking]}s</h3><span class="muted small">votaron / cargados</span></div>
       ${ranking.map(({ u, n, v }) => `<div class="miembro"><div class="ini rol-${u.rol}">${esc(iniciales(u.nombre))}</div>
         <div class="grow"><div style="font-weight:600">${esc(u.nombre)}</div><div class="muted small">${u.circuito ? 'Circuito ' + esc(u.circuito) : ''}</div></div>
-        <span class="num" style="font-weight:700">${v}/${n}</span><span class="pill ${pct(v, n) >= 60 ? 'p-ok' : 'p-warn'}">${pct(v, n)}%</span></div>`).join('')}
+        <span class="num" style="font-weight:700">${fmtN(v)}/${fmtN(n)}</span><span class="pill ${pct(v, n) >= 60 ? 'p-ok' : 'p-warn'}">${pct(v, n)}%</span></div>`).join('')}
     </div>` : ''}`;
 }
 
@@ -803,10 +943,11 @@ function bloqueCircuitos(porCirc) {
   const lista = [...claves].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
   if (!lista.length) return '';
   st.circAbiertos ||= new Set();
-  const fmt = (x) => x.toLocaleString('es-AR');
+  const fmt = fmtN;
+  const lv = liviano();
   const barra = (v, n) => `<div class="bar"><i style="width:${pct(v, n)}%"></i></div>`;
   const filas = lista.map((k) => {
-    const [n, v] = porCirc[k] || [0, 0];
+    const [n, v] = lv ? [conteo('c' + k, [['circuito', '==', k]]), conteo('cv' + k, [['circuito', '==', k], ['voto', '==', true]])] : (porCirc[k] || [0, 0]);
     const e = res[k]?.e;
     const abierto = st.circAbiertos.has(k);
     let html = `<button type="button" class="circ-btn" data-act="circ-toggle" data-c="${esc(k)}" aria-expanded="${abierto}">
@@ -819,13 +960,14 @@ function bloqueCircuitos(porCirc) {
     </button>`;
     if (!abierto) return html;
     const escs = {};
-    for (const p of st.personas) {
+    if (lv) for (const r of res[k]?.esc || []) escs[r.n] = { n: conteo('e' + k + r.n, [['circuito', '==', k], ['escuela', '==', r.n]]), v: conteo('ev' + k + r.n, [['circuito', '==', k], ['escuela', '==', r.n], ['voto', '==', true]]), e: 0 };
+    if (!lv) for (const p of st.personas) {
       if ((p.circuito || '–') !== k) continue;
       const x = (escs[p.escuela || 'Sin escuela'] ||= { n: 0, v: 0, e: 0 });
       x.n++; if (p.voto) x.v++;
     }
     for (const r of res[k]?.esc || []) (escs[r.n] ||= { n: 0, v: 0, e: 0 }).e = r.e;
-    const nombres = Object.keys(escs).sort((a, b) => escs[b].n - escs[a].n || a.localeCompare(b));
+    const nombres = Object.keys(escs).sort((a, b) => (escs[b].n || 0) - (escs[a].n || 0) || a.localeCompare(b));
     html += `<div class="circ-esc">${nombres.map((nm) => {
       const x = escs[nm];
       return `<div><div class="row small" style="justify-content:space-between;gap:8px"><span style="font-weight:600">${esc(nm)}</span>
@@ -843,7 +985,7 @@ function bloqueCircuitos(porCirc) {
 function cargarResumen(forzar = false) {
   if (!forzar && st.resumen !== undefined) return;
   st.resumen = st.resumen ?? null;
-  S.leerResumenPadron().then((r) => { st.resumen = r; pintarTablero(); }).catch(() => {});
+  S.leerResumenPadron().then((r) => { st.resumen = r; refrescarPartes(); }).catch(() => {});
 }
 
 function pintarConflictos() {
@@ -855,7 +997,7 @@ function pintarConflictos() {
   el.innerHTML = `<div class="sec-title"><h2>Conflictos</h2><span class="pill p-bad">${pend.length}</span></div>
     <div class="muted small" style="margin:4px 0 10px">Intentos de cargar a alguien que ya es de otra persona.${cab ? ' Podés dejarlo como está o pasarlo a quien reclama.' : ''}</div>
     <div class="stack">${pend.map((c) => {
-      const p = cab ? st.personas.find((x) => x.dni === c.dni) : null;
+      const p = cab ? personaPorDni(c.dni) : null;
       return `<div class="card pad stack">
         <div class="row"><div class="grow"><b class="num">DNI ${fmtDni(c.dni)}</b>${p ? ` · ${esc(p.nombre)}` : ''}<div class="muted small">Intentó cargarlo <b>${esc(c.byNombre)}</b>${p ? ` · hoy es de <b>${esc(p.ownerNombre)}</b>` : ''}</div></div>
         <span class="pill ${c.estado === 'reclamo' ? 'p-warn' : 'p-neutral'}">${c.estado === 'reclamo' ? 'Reclamo' : 'Intento'}</span></div>
@@ -942,7 +1084,7 @@ async function confirmarImportacion(pre = 'imp') {
   });
   // Fiscales que ya estaban en el equipo como votantes: se marcan como fiscales
   let marcados = 0;
-  if (fis) for (const d of imp.propias) { try { await S.actualizarPersona(d.dni, { tipo: d.tipo }); marcados++; } catch { /* sigue */ } }
+  if (fis) for (const d of imp.propias) { try { await actualizarPersonaApp(d.dni, { tipo: d.tipo }); marcados++; } catch { /* sigue */ } }
   delete st.imp[pre];
   $(`#${pre}-file`).value = '';
   res.innerHTML = `<div class="aviso ok">${ic('ok', 18)}<span>Listo: ${ok} ${fis ? 'fiscales cargados' : 'importadas'} a ${esc(dueno.uid === st.me.uid ? 'tu lista' : dueno.nombre)}.${marcados ? ` ${marcados} que ya estaban pasaron a fiscales.` : ''}${conflictos ? ` ${conflictos} quedaron como conflicto.` : ''}</span></div>`;
@@ -1230,7 +1372,7 @@ function resumenActaHtml(acta, listas) {
 }
 
 // ---------------------------------------------------------------- FISCALIZACIÓN (conducción)
-const fiscalesSinAcceso = () => st.personas.filter((p) => p.tipo && p.tipo !== 'votante' && !st.usuarios.some((u) => u.dni === p.dni));
+const fiscalesSinAcceso = () => personasFiscales().filter((p) => !st.usuarios.some((u) => u.dni === p.dni));
 
 function calcularEscrutinio(fs, cat) {
   const porMesa = {};
@@ -1319,7 +1461,7 @@ function hojaFiscal(id) {
 }
 
 function hojaAccesoFiscal(dnis) {
-  const ps = dnis.map((d) => st.personas.find((p) => p.dni === d)).filter(Boolean);
+  const ps = dnis.map((d) => personaLocal(d)).filter(Boolean);
   if (!ps.length) return;
   abrirHoja(`
     <div class="row"><h2 class="grow">Acceso para ${ps.length === 1 ? esc(primerNombre(ps[0].nombre)) : ps.length + ' fiscales'}</h2><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
@@ -1334,7 +1476,7 @@ async function crearAccesosFiscales(dnis) {
   const res = $('#acc-res'); const link = location.origin + location.pathname;
   const filas = [];
   for (const dni of dnis) {
-    const p = st.personas.find((x) => x.dni === dni);
+    const p = personaLocal(dni);
     if (!p) continue;
     let padre = usuarioPorId(p.ownerId);
     if (!padre || padre.rol === 'fiscal') padre = st.me;
@@ -1376,18 +1518,18 @@ const acciones = {
   salir,
   'demo-reset': () => { S.reiniciarDemo(); cerrarHoja(); toast('Datos de prueba reiniciados'); },
   cerrar: cerrarHoja,
-  filtro: (el) => { st.f.estado = el.dataset.v; st.f.limite = 60; document.querySelectorAll('[data-act=filtro]').forEach((b) => b.setAttribute('aria-pressed', b === el)); pintarLista(); },
-  mas: () => { st.f.limite += 60; pintarLista(); },
+  filtro: (el) => { st.f.estado = el.dataset.v; st.f.limite = 60; document.querySelectorAll('[data-act=filtro]').forEach((b) => b.setAttribute('aria-pressed', b === el)); if (liviano()) suscribirPagina(); else pintarLista(); },
+  mas: () => { st.f.limite += 60; if (liviano()) suscribirPagina(); else pintarLista(); },
   ver: (el) => hojaPersona(el.dataset.dni),
-  'p-estado': async (el) => { const dni = sheetCtx.dni; await S.actualizarPersona(dni, { estado: el.dataset.v }); hojaPersona(dni); },
-  'p-voto': async () => { const dni = sheetCtx.dni; const p = st.personas.find((x) => x.dni === dni); await S.actualizarPersona(dni, { voto: !p.voto, votoAt: p.voto ? null : Date.now() }); hojaPersona(dni); },
+  'p-estado': async (el) => { const dni = sheetCtx.dni; await actualizarPersonaApp(dni, { estado: el.dataset.v }); hojaPersona(dni); },
+  'p-voto': async () => { const dni = sheetCtx.dni; const p = personaLocal(dni); await actualizarPersonaApp(dni, { voto: !p.voto, votoAt: p.voto ? null : Date.now() }); hojaPersona(dni); },
   'p-transferir': async () => {
     const dni = sheetCtx.dni; const u = usuarioPorId($('#p-trans').value);
     try { await S.transferirPersona(dni, u); toast(`Pasada a ${u.nombre}`); hojaPersona(dni); } catch (e) { toast(mensajeError(e)); }
   },
   'p-eliminar': () => hojaPersona(sheetCtx.dni, true),
   'p-eliminar-no': () => hojaPersona(sheetCtx.dni),
-  'p-eliminar-si': async () => { await S.eliminarPersona(sheetCtx.dni); cerrarHoja(); toast('Quitada de la lista'); },
+  'p-eliminar-si': async () => { await S.eliminarPersona(sheetCtx.dni); cachePersonas.delete(sheetCtx.dni); invalidarConteos(); programarRefresco(); cerrarHoja(); toast('Quitada de la lista'); },
   'c-buscar': buscarDni,
   'c-estado': (el) => { st.c.estado = el.dataset.v; document.querySelectorAll('[data-act=c-estado]').forEach((b) => b.setAttribute('aria-pressed', b === el)); },
   'c-guardar': guardarCarga,
@@ -1399,11 +1541,11 @@ const acciones = {
     st.c.fase = 'reclamado'; pintarCargar();
   },
   voto: async (el) => {
-    const p = st.personas.find((x) => x.dni === el.dataset.dni);
+    const p = personaLocal(el.dataset.dni);
     if (!p) return;
     el.classList.toggle('si', !p.voto); el.textContent = p.voto ? 'Ya votó' : '✓ Votó';
     if (!p.voto && st.dia.solo === 'pend') await pausa(450);
-    await S.actualizarPersona(p.dni, { voto: !p.voto, votoAt: p.voto ? null : Date.now() });
+    await actualizarPersonaApp(p.dni, { voto: !p.voto, votoAt: p.voto ? null : Date.now() });
   },
   'dia-solo': (el) => { st.dia.solo = el.dataset.v; pintarDia(); },
   'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol, el.dataset.padre || null),
@@ -1413,10 +1555,11 @@ const acciones = {
     const u = usuarioPorId(el.dataset.uid);
     const sel = $('#qu-destino')?.value;
     const destino = sel && sel !== '__borrar' ? usuarioPorId(sel) : null;
-    const dnis = st.personas.filter((p) => p.ownerId === u.uid).map((p) => p.dni);
     el.disabled = true; el.textContent = 'Quitando…';
     try {
+      const dnis = (await todaLaGente([['ownerId', '==', u.uid]])).map((p) => p.dni);
       await S.quitarUsuario(u, dnis, destino);
+      delete genteDe[u.uid]; invalidarConteos();
       cerrarHoja();
       toast(`${primerNombre(u.nombre)} ya no está en el equipo${dnis.length ? (destino ? ` · su gente pasó a ${destino.nombre}` : ' · su gente se borró') : ''}`);
     } catch (e) {
@@ -1424,7 +1567,7 @@ const acciones = {
       el.disabled = false; el.textContent = 'Quitar';
     }
   },
-  'circ-toggle': (el) => { const k = el.dataset.c; if (st.circAbiertos.has(k)) st.circAbiertos.delete(k); else st.circAbiertos.add(k); pintarTablero(); },
+  'circ-toggle': (el) => { const k = el.dataset.c; if (st.circAbiertos.has(k)) st.circAbiertos.delete(k); else st.circAbiertos.add(k); refrescarPartes(); },
   'circ-recalcular': async (el) => {
     el.disabled = true; el.textContent = 'Leyendo el padrón…';
     try { st.resumen = await S.recalcularResumenPadron(); pintarTablero(); if (!st.resumen) toast('No hay padrón cargado'); }
@@ -1498,12 +1641,15 @@ const acciones = {
     const que = $('#borrar-que').value;
     const res = $('#borrar-res');
     if ($('#borrar-ok').value.trim().toUpperCase() !== 'BORRAR') { res.innerHTML = '<div class="error">Escribí BORRAR para confirmar.</div>'; return; }
-    const dnis = st.personas.map((p) => p.dni);
+    res.innerHTML = '<div class="muted" id="borrar-txt">Juntando la lista…</div><div class="progreso"><i id="borrar-prog"></i></div>';
+    let dnis = [];
+    if (que === 'personas') { try { dnis = (await todaLaGente()).map((p) => p.dni); } catch (e) { res.innerHTML = `<div class="aviso bad">${esc(mensajeError(e))}</div>`; return; } }
     res.innerHTML = '<div class="muted" id="borrar-txt">Borrando…</div><div class="progreso"><i id="borrar-prog"></i></div>';
     const prog = (h, t) => { const b = $('#borrar-prog'); if (b) b.style.width = pct(h, t) + '%'; const x = $('#borrar-txt'); if (x) x.textContent = `Borrando ${h.toLocaleString('es-AR')} de ${t.toLocaleString('es-AR')}…`; };
     try {
       if (que === 'personas') {
         await S.borrarPersonas(dnis, prog);
+        cachePersonas.clear(); for (const k in genteDe) delete genteDe[k]; fiscPers = null; fiscT = 0; invalidarConteos();
         // Los conflictos pendientes ya no tienen sentido: se cierran
         for (const c of st.conflictos.filter((x) => x.estado === 'intento' || x.estado === 'reclamo')) { try { await S.resolverConflicto(c, false); } catch { /* sigue */ } }
       } else { await S.borrarPadron(prog); st.resumen = null; pintarTablero(); }
@@ -1516,7 +1662,7 @@ const acciones = {
   'imp-confirmar': (el) => confirmarImportacion(el.dataset.pre || 'imp'),
   'pad-confirmar': confirmarPadron,
   exportar: async () => {
-    try { await exportarExcel(st.personas, st.usuarios, `${APP_NAME}-${new Date().toISOString().slice(0, 10)}.xlsx`); toast('Excel descargado'); }
+    try { if (liviano()) toast('Preparando el Excel…'); await exportarExcel(await todaLaGente(), st.usuarios, `${APP_NAME}-${new Date().toISOString().slice(0, 10)}.xlsx`); toast('Excel descargado'); }
     catch (e) { toast(mensajeError(e)); }
   }
 };
@@ -1553,7 +1699,7 @@ let tBusqueda = null;
 document.addEventListener('input', (e) => {
   const id = e.target.id;
   if (e.target.dataset?.voto) { st.fx.votos[e.target.dataset.voto] = e.target.value; actualizarSumaActa(); }
-  if (id === 'q') { st.f.q = e.target.value; st.f.limite = 60; clearTimeout(tBusqueda); tBusqueda = setTimeout(pintarLista, 150); }
+  if (id === 'q') { st.f.q = e.target.value; st.f.limite = 60; clearTimeout(tBusqueda); tBusqueda = setTimeout(liviano() ? suscribirPagina : pintarLista, liviano() ? 400 : 150); }
   if (id === 'c-dni') {
     st.c.dniTxt = e.target.value;
     if (normDni(e.target.value).length === 8) buscarDni();
@@ -1584,12 +1730,12 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('change', async (e) => {
   const id = e.target.id;
-  if (id === 'de') { st.f.de = e.target.value; st.f.limite = 60; pintarLista(); }
+  if (id === 'de') { st.f.de = e.target.value; st.f.limite = 60; if (liviano()) suscribirPagina(); else pintarLista(); }
   if (sheetCtx?.tipo === 'persona') {
     const dni = sheetCtx.dni;
-    if (id === 'p-tel') { await S.actualizarPersona(dni, { tel: normDni(e.target.value) }); toast('Teléfono guardado'); }
-    if (id === 'p-nota') { await S.actualizarPersona(dni, { nota: e.target.value.trim(), revisar: false }); toast('Nota guardada'); }
-    if (id === 'p-tipo') { await S.actualizarPersona(dni, { tipo: e.target.value }); }
+    if (id === 'p-tel') { await actualizarPersonaApp(dni, { tel: normDni(e.target.value) }); toast('Teléfono guardado'); }
+    if (id === 'p-nota') { await actualizarPersonaApp(dni, { nota: e.target.value.trim(), revisar: false }); toast('Nota guardada'); }
+    if (id === 'p-tipo') { await actualizarPersonaApp(dni, { tipo: e.target.value }); }
   }
   if (id === 'fx-foto' && e.target.files[0]) tomarFotoActa(e.target.files[0]);
   if (id === 'imp-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'imp');
