@@ -34,7 +34,7 @@ async function cargarMe(uid) {
   const u = await getDoc(D('usuarios', uid));
   if (!u.exists()) throw Object.assign(new Error('Tu usuario fue dado de baja de la campaña'), { code: 'sin-campania' });
   const camp = await getDoc(doc(db, 'campanias', cid));
-  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [] };
+  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [] };
   return me;
 }
 
@@ -289,10 +289,10 @@ export async function contarPersonas() {
 // actas/{uidFiscal}: la foto del acta (comprimida), aparte para no cargarla salvo que se pida
 export async function leerListas() {
   const c = await getDoc(doc(db, 'campanias', cid));
-  return c.data()?.listas || [];
+  return { listas: c.data()?.listas || [], categorias: c.data()?.categorias || [] };
 }
-export function guardarListas(listas) {
-  return sinTrabar(updateDoc(doc(db, 'campanias', cid), { listas }));
+export function guardarListas(listas, categorias) {
+  return sinTrabar(updateDoc(doc(db, 'campanias', cid), { listas, categorias }));
 }
 export function watchFiscalias(cb) {
   if (me.rol === 'fiscal') return onSnapshot(D('fiscalias', me.uid), (s) => cb(s.exists() ? [{ ...s.data(), id: s.id }] : []), (e) => console.error(e));

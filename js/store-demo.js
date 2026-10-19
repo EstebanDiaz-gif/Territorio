@@ -3,7 +3,7 @@
 import { bucketDe, padronAString, padronDeString, nivel, idLista } from './roles.js';
 
 export const modo = 'demo';
-const KEY = 'territorio-demo-v4';
+const KEY = 'territorio-demo-v5';
 const SESION = 'territorio-demo-sesion';
 let db = null;
 let me = null;
@@ -29,7 +29,7 @@ export async function init() {
   if (uid && db.usuarios[uid]) me = conCampania(db.usuarios[uid]);
   return me;
 }
-const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [] });
+const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [] });
 
 export async function login(dni, pass) {
   await espera();
@@ -233,8 +233,8 @@ export async function duenoDe(dni) {
 }
 
 // ---------- Fiscalización ----------
-export async function leerListas() { return db.campania.listas || []; }
-export async function guardarListas(listas) { db.campania.listas = listas; if (me) me.listas = listas; guardar(); }
+export async function leerListas() { return { listas: db.campania.listas || [], categorias: db.campania.categorias || [] }; }
+export async function guardarListas(listas, categorias) { Object.assign(db.campania, { listas, categorias }); if (me) Object.assign(me, { listas, categorias }); guardar(); }
 export function watchFiscalias(cb) {
   const f = () => cb(Object.values(db.fiscalias || {}).filter((x) => me.rol === 'cabeza' || x.path.includes(me.uid)));
   subs.add(f); f();
@@ -336,13 +336,19 @@ function semilla() {
     fiscalias[uid] = { id: uid, fiscalUid: uid, nombre, dni, tel: '', path, presente: false, incidencias: [], mesa: '', escuela: '', ...extra };
   };
   F('fis1', 'Nadia Yasmín', '40431477', 'mov1', { votaEscuela: 'Esc. Manuel Belgrano', votaMesa: '1043', circuito: '19' });
+  const categorias = ['Gobernador', 'Legisladores', 'Concejales'].map((n) => ({ id: idLista('cat ' + n), nombre: n }));
   const votos = (a, b, c) => ({ [listas[0].id]: a, [listas[1].id]: b, [listas[2].id]: c });
-  F('fx1', 'Mónica Romano', '43500197', 'mov2', { mesa: '1044', escuela: 'Esc. Manuel Belgrano', circuito: '19', presente: true, presenteAt: Date.now() - 9 * 36e5, acta: { votos: votos(112, 74, 21), blancos: 6, nulos: 3, recurridos: 0, impugnados: 0, total: 216 }, actaAt: Date.now() - 20 * 6e4, tieneFoto: false });
+  // Un acta con las tres categorías (los números de cada una varían un poco)
+  const acta3 = (a, b, c, bl, nu, re, total) => ({ cats: Object.fromEntries(categorias.map((k, i) => {
+    const d = [[0, 0, 0], [-6, 5, 1], [-10, 7, 3]][i];
+    return [k.id, { votos: votos(a + d[0], b + d[1], c + d[2]), blancos: bl + i, nulos: nu, recurridos: re, impugnados: 0, total: total + i, sumaOk: true }];
+  })) });
+  F('fx1', 'Mónica Romano', '43500197', 'mov2', { mesa: '1044', escuela: 'Esc. Manuel Belgrano', circuito: '19', presente: true, presenteAt: Date.now() - 9 * 36e5, acta: acta3(112, 74, 21, 6, 3, 0, 216), actaAt: Date.now() - 20 * 6e4, tieneFoto: false });
   F('fx2', 'Vanesa Gutiérrez', '28966863', 'mov3', { mesa: '1051', escuela: 'Esc. D. F. Sarmiento', circuito: '19', presente: true, presenteAt: Date.now() - 9 * 36e5, incidencias: [{ texto: 'Faltan boletas de nuestra lista', at: Date.now() - 5 * 36e5 }] });
-  F('fx3', 'Oscar Díaz', '17696513', 'mov4', { mesa: '1102', escuela: 'Esc. Juan B. Alberdi', circuito: '20', presente: true, presenteAt: Date.now() - 9 * 36e5, acta: { votos: votos(98, 101, 15), blancos: 4, nulos: 2, recurridos: 1, impugnados: 0, total: 221 }, actaAt: Date.now() - 20 * 6e4, tieneFoto: false });
+  F('fx3', 'Oscar Díaz', '17696513', 'mov4', { mesa: '1102', escuela: 'Esc. Juan B. Alberdi', circuito: '20', presente: true, presenteAt: Date.now() - 9 * 36e5, acta: acta3(98, 101, 15, 4, 2, 1, 221), actaAt: Date.now() - 20 * 6e4, tieneFoto: false });
   F('fx4', 'Silvia Alvarado', '32110664', 'mov5', { mesa: '1110', escuela: 'Esc. Gral. San Martín', circuito: '20', presente: false });
   return {
-    campania: { nombre: 'Frente Demo 2027', listas },
+    campania: { nombre: 'Frente Demo 2027', listas, categorias },
     usuarios, claves, padron, personas, conflictos: {}, fiscalias
   };
 }

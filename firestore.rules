@@ -32,7 +32,7 @@ service cloud.firestore {
 
       allow read: if miembro();
       allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if esCabeza() && soloCambia(['nombre', 'listas']);
+      allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias']);
 
       // ---------- Usuarios ----------
       match /usuarios/{uid} {

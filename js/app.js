@@ -744,9 +744,13 @@ function vistaPanel() {
         <label class="archivo" for="pad-file">${ic('subir', 22)}<div><b>Elegir padrón</b></div><input id="pad-file" type="file" accept=".xlsx,.xls,.csv,.ods,.docx"></label>
         <div id="pad-res" class="stack"></div>`) : ''}
       ${st.me.rol === 'cabeza' ? herr('listas', 'fiscal', 'Listas del escrutinio', 'Las que cargan los fiscales del acta', `
-        <div class="muted">Una lista por renglón, como figuran en el acta (por ejemplo "Lista 501 · Frente …"). Blancos, nulos, recurridos e impugnados ya vienen incluidos. No cambies los nombres una vez que los fiscales empezaron a cargar.</div>
-        <textarea id="listas-txt" class="input" rows="5" placeholder="Lista 501 · Nuestro frente&#10;Lista 502 · …">${esc((st.me.listas || []).map((l) => l.nombre).join('\n'))}</textarea>
-        <button class="btn" data-act="listas-guardar">Guardar listas</button>`) : ''}
+        <div class="muted">Cargá <b>todas</b> las listas que compiten, no solo la tuya, una por renglón y como figuran en el acta. Blancos, nulos, recurridos e impugnados ya vienen incluidos. No cambies los nombres una vez que los fiscales empezaron a cargar.</div>
+        <div><label class="label" for="listas-txt">Listas</label>
+        <textarea id="listas-txt" class="input" rows="5" placeholder="Lista 501 · Nuestro frente&#10;Lista 502 · …">${esc((st.me.listas || []).map((l) => l.nombre).join('\n'))}</textarea></div>
+        <div><label class="label" for="cats-txt">Categorías del acta (una por renglón, en el orden del acta)</label>
+        <textarea id="cats-txt" class="input" rows="3" placeholder="Gobernador&#10;Legisladores&#10;Concejales">${esc((st.me.categorias || []).map((l) => l.nombre).join('\n'))}</textarea>
+        <div class="muted small" style="margin-top:4px">Si la elección tiene una sola categoría, dejalo vacío.</div></div>
+        <button class="btn" data-act="listas-guardar">Guardar</button>`) : ''}
       ${herr('excel', 'bajar', 'Descargar Excel', 'Toda la gente de tu equipo', `
         <button class="btn btn-sec" data-act="exportar">${ic('bajar')} Descargar Excel</button>`)}
       ${st.me.rol === 'cabeza' ? herr('borrar', 'alerta', 'Borrar datos', 'Para empezar de nuevo', `
@@ -1004,7 +1008,7 @@ function pintarFiscal() {
   if (!st.fx.inicio) {
     st.fx.inicio = true;
     fx({}).catch(() => {});
-    S.leerListas().then((l) => { me.listas = l; refrescarFiscal(); }).catch(() => {});
+    S.leerListas().then((r) => { me.listas = r.listas; me.categorias = r.categorias; refrescarFiscal(); }).catch(() => {});
     S.leerResumenPadron().then((r) => { st.resumen = r; refrescarFiscal(); }).catch(() => {});
   }
   const f = miFiscalia();
@@ -1053,19 +1057,11 @@ function pintarFiscal() {
 
       <section class="card pad stack paso">
         <div class="paso-h"><span class="paso-n ${acta && !st.fx.corrigiendo ? 'hecho' : ''}">${acta && !st.fx.corrigiendo ? '✓' : '3'}</span><h2>Cierre: el acta</h2></div>
-        ${!mostrarFormActa ? resumenActaHtml(acta, listas) + `<div class="muted small">Enviado a las ${hora(f.actaAt)}${f.tieneFoto ? ' · con foto' : ' · sin foto'}</div><button class="btn btn-ghost btn-sm" data-act="fx-corregir">Corregir</button>` : `
+        ${!mostrarFormActa ? resumenActaHtml(acta, listas) + `<div class="muted small">Enviado a las ${hora(f.actaAt)}${f.tieneFoto ? ' · con foto' : ' · sin foto'}</div>
+          ${faltanCats(acta).length ? `<div class="aviso warn">${ic('alerta', 18)}<span>Falta cargar: ${faltanCats(acta).map((c) => esc(c.nombre)).join(', ')}.</span></div><button class="btn btn-full" data-act="fx-corregir">Completar lo que falta</button>` : '<button class="btn btn-ghost btn-sm" data-act="fx-corregir">Corregir</button>'}` : `
           <div class="muted">Cuando termine el conteo: sacale una foto al acta y copiá los números.</div>
           ${fotoActaHtml()}
-          ${listas.length ? `
-            <div class="stack" style="gap:8px">
-              ${listas.map((l) => campoVoto(l.id, l.nombre)).join('')}
-              ${campoVoto('blancos', 'Votos en blanco')}${campoVoto('nulos', 'Votos nulos')}${campoVoto('recurridos', 'Recurridos')}${campoVoto('impugnados', 'Impugnados')}
-              <div class="voto-fila total">${campoVoto('total', 'Total de votantes de la mesa (según el acta)', true)}</div>
-              <div id="fx-suma" class="small"></div>
-            </div>
-            <div class="error" id="fx-err-acta" role="alert"></div>
-            <button class="btn btn-full btn-grande" data-act="fx-enviar-acta">Enviar resultado</button>`
-          : '<div class="aviso warn">' + ic('alerta', 18) + '<span>Todavía no están cargadas las listas. Avisale a tu referente.</span></div>'}`}
+          ${listas.length ? formActaHtml(acta) : '<div class="aviso warn">' + ic('alerta', 18) + '<span>Todavía no están cargadas las listas. Avisale a tu referente.</span></div>'}`}
       </section>
     </main>`;
   actualizarSumaActa();
@@ -1079,7 +1075,40 @@ function refrescarFiscal() {
   pintarFiscal();
 }
 
-const campoVoto = (id, nombre, solo) => `${solo ? '' : '<div class="voto-fila">'}<label for="v-${id}">${esc(nombre)}</label><input id="v-${id}" class="input num" inputmode="numeric" data-voto="${id}" value="${esc(st.fx.votos[id] ?? '')}" placeholder="0">${solo ? '' : '</div>'}`;
+const campoVoto = (id, nombre, solo) => { const k = catActual() + '|' + id; return `${solo ? '' : '<div class="voto-fila">'}<label for="v-${id}">${esc(nombre)}</label><input id="v-${id}" class="input num" inputmode="numeric" enterkeyhint="next" data-voto="${k}" value="${esc(st.fx.votos[k] ?? '')}" placeholder="0">${solo ? '' : '</div>'}`; };
+
+// ----- categorías del acta
+const CAT_UNICA = { id: 'general', nombre: 'Resultado' };
+const categorias = () => (st.me.categorias?.length ? st.me.categorias : [CAT_UNICA]);
+const catActual = () => (categorias().some((c) => c.id === st.fx.cat) ? st.fx.cat : categorias()[0].id);
+// Actas viejas (sin categorías) se leen como la primera categoría
+const catsDeActa = (acta) => (!acta ? {} : acta.cats || (acta.votos ? { [categorias()[0].id]: acta } : {}));
+const faltanCats = (acta) => { const h = catsDeActa(acta); return st.me.categorias?.length ? categorias().filter((c) => !h[c.id]) : []; };
+function catCompleta(catId) {
+  const a = leerVotos(catId);
+  return a.total != null && Object.values(a.votos).every((x) => x != null);
+}
+
+function formActaHtml(acta) {
+  const cs = categorias(); const cat = catActual(); const enviadas = catsDeActa(acta);
+  const i = cs.findIndex((c) => c.id === cat);
+  const listas = st.me.listas || [];
+  return `
+    ${cs.length > 1 ? `<div class="cat-tabs" role="tablist">${cs.map((c, n) => {
+      const ok = catCompleta(c.id) || (enviadas[c.id] && !st.fx.corrigiendo);
+      return `<button type="button" role="tab" class="cat-tab ${c.id === cat ? 'activa' : ''}" aria-selected="${c.id === cat}" data-act="fx-cat" data-c="${c.id}">${ok ? '✓ ' : (n + 1) + '. '}${esc(c.nombre)}</button>`;
+    }).join('')}</div>
+    <div class="muted small">Copiá la columna <b>${esc(cs[i].nombre)}</b> del acta. Tocá "Siguiente" en el teclado para pasar al próximo número.</div>` : ''}
+    <div class="stack" style="gap:8px">
+      ${listas.map((l) => campoVoto(l.id, l.nombre)).join('')}
+      ${campoVoto('blancos', 'Votos en blanco')}${campoVoto('nulos', 'Votos nulos')}${campoVoto('recurridos', 'Recurridos')}${campoVoto('impugnados', 'Impugnados')}
+      <div class="voto-fila total">${campoVoto('total', cs.length > 1 ? 'Total de ' + cs[i].nombre + ' (según el acta)' : 'Total de votantes de la mesa (según el acta)', true)}</div>
+      <div id="fx-suma" class="small"></div>
+    </div>
+    <div class="error" id="fx-err-acta" role="alert"></div>
+    ${i < cs.length - 1 ? `<button class="btn btn-sec btn-full" data-act="fx-siguiente">Siguiente: ${esc(cs[i + 1].nombre)} ›</button>` : ''}
+    <button class="btn btn-full btn-grande" data-act="fx-enviar-acta">${cs.length > 1 && i < cs.length - 1 ? 'Enviar lo cargado' : 'Enviar resultado'}</button>`;
+}
 
 function fotoActaHtml() {
   const ft = st.fx.foto;
@@ -1142,8 +1171,8 @@ async function procesarFoto(file) {
   return { url, nitidez: Math.round(nitidez), brillo: Math.round(brillo), problemas };
 }
 
-function leerVotos() {
-  const v = st.fx.votos; const num = (k) => { const x = String(v[k] ?? '').trim(); return x === '' ? null : parseInt(normDni(x) || '0', 10); };
+function leerVotos(cat = catActual()) {
+  const v = st.fx.votos; const num = (k) => { const x = String(v[cat + '|' + k] ?? '').trim(); return x === '' ? null : parseInt(normDni(x) || '0', 10); };
   const listas = st.me.listas || [];
   const votos = Object.fromEntries(listas.map((l) => [l.id, num(l.id)]));
   return { votos, blancos: num('blancos'), nulos: num('nulos'), recurridos: num('recurridos'), impugnados: num('impugnados'), total: num('total') };
@@ -1157,17 +1186,29 @@ function actualizarSumaActa() {
     : `<span style="color:var(--bad);font-weight:700">La suma da ${suma} y el total dice ${a.total}. Revisá los números.</span>`;
 }
 async function enviarActa() {
-  const a = leerVotos(); const err = $('#fx-err-acta');
-  if (Object.values(a.votos).some((x) => x == null) || a.total == null) { err.textContent = 'Completá todas las listas y el total (si una lista no tuvo votos, poné 0).'; return; }
-  ['blancos', 'nulos', 'recurridos', 'impugnados'].forEach((k) => { if (a[k] == null) a[k] = 0; });
-  const suma = Object.values(a.votos).reduce((x, y) => x + y, 0) + a.blancos + a.nulos + a.recurridos + a.impugnados;
-  if (suma !== a.total && !st.fx.confirmaDiferencia) { err.textContent = `La suma (${suma}) no coincide con el total (${a.total}). Revisá; si el acta dice así, tocá Enviar otra vez.`; st.fx.confirmaDiferencia = true; return; }
+  const err = $('#fx-err-acta');
+  const cs = categorias();
+  const previas = st.fx.corrigiendo ? {} : catsDeActa(miFiscalia().acta);
+  const nuevas = {};
+  for (const c of cs) {
+    if (!catCompleta(c.id)) continue;
+    const a = leerVotos(c.id);
+    ['blancos', 'nulos', 'recurridos', 'impugnados'].forEach((k) => { if (a[k] == null) a[k] = 0; });
+    const suma = Object.values(a.votos).reduce((x, y) => x + y, 0) + a.blancos + a.nulos + a.recurridos + a.impugnados;
+    nuevas[c.id] = { ...a, sumaOk: suma === a.total, suma };
+  }
+  if (!Object.keys(nuevas).length) { err.textContent = 'Completá todas las listas y el total (si una lista no tuvo votos, poné 0).'; return; }
+  const malas = cs.filter((c) => nuevas[c.id] && !nuevas[c.id].sumaOk);
+  if (malas.length && !st.fx.confirmaDiferencia) { err.textContent = `En ${malas.map((c) => c.nombre).join(', ')} la suma no coincide con el total. Revisá; si el acta dice así, tocá Enviar otra vez.`; st.fx.confirmaDiferencia = true; return; }
+  const faltan = cs.filter((c) => !nuevas[c.id] && !previas[c.id]);
+  if (cs.length > 1 && faltan.length && !st.fx.confirmaParcial) { err.textContent = `Falta ${faltan.map((c) => c.nombre).join(', ')}. Tocá Enviar otra vez para mandar lo que tenés; después completás el resto.`; st.fx.confirmaParcial = true; return; }
   if (!st.fx.foto && !miFiscalia().tieneFoto && !st.fx.confirmaSinFoto) { err.textContent = 'Falta la foto del acta. Sacala arriba; si no podés, tocá Enviar otra vez.'; st.fx.confirmaSinFoto = true; return; }
   const btn = $('[data-act="fx-enviar-acta"]'); btn.disabled = true; btn.textContent = 'Enviando…';
   try {
     if (st.fx.foto) await S.guardarActa(st.me.uid, st.fx.foto.url, st.me.path);
-    await fx({ acta: { ...a, sumaOk: suma === a.total }, actaAt: Date.now(), tieneFoto: !!(st.fx.foto || miFiscalia().tieneFoto), mesa: miFiscalia().mesa || '', escuela: miFiscalia().escuela || '' });
-    st.fx = { ...st.fx, foto: null, corrigiendo: false, confirmaDiferencia: false, confirmaSinFoto: false };
+    for (const k in nuevas) delete nuevas[k].suma;
+    await fx({ acta: { cats: { ...previas, ...nuevas } }, actaAt: Date.now(), tieneFoto: !!(st.fx.foto || miFiscalia().tieneFoto), mesa: miFiscalia().mesa || '', escuela: miFiscalia().escuela || '' });
+    st.fx = { ...st.fx, foto: null, corrigiendo: false, confirmaDiferencia: false, confirmaSinFoto: false, confirmaParcial: false };
     toast('Resultado enviado. ¡Gracias!');
     pintarFiscal();
   } catch (e) { err.textContent = mensajeError(e); btn.disabled = false; btn.textContent = 'Enviar resultado'; }
@@ -1180,18 +1221,20 @@ function guardarMesaFiscal(mesa, escuela) {
 
 function resumenActaHtml(acta, listas) {
   const nombre = Object.fromEntries((listas || []).map((l) => [l.id, l.nombre]));
-  return `<div class="stack" style="gap:4px">${Object.entries(acta.votos || {}).map(([id, v]) => `<div class="row small" style="justify-content:space-between"><span>${esc(nombre[id] || 'Lista')}</span><b class="num">${v}</b></div>`).join('')}
-    <div class="row small muted" style="justify-content:space-between"><span>Blancos · nulos · recurridos · impugnados</span><span class="num">${acta.blancos || 0} · ${acta.nulos || 0} · ${acta.recurridos || 0} · ${acta.impugnados || 0}</span></div>
-    <div class="row small" style="justify-content:space-between"><b>Total</b><b class="num">${acta.total}</b></div>
-    ${acta.sumaOk === false ? '<div class="small" style="color:var(--bad)">La suma no coincide con el total.</div>' : ''}</div>`;
+  const h = catsDeActa(acta); const cs = categorias().filter((c) => h[c.id]);
+  return cs.map((c) => { const a = h[c.id]; return `<div class="stack acta-cat" style="gap:4px">${categorias().length > 1 ? `<b class="small">${esc(c.nombre)}</b>` : ''}
+    ${Object.entries(a.votos || {}).map(([id, v]) => `<div class="row small" style="justify-content:space-between"><span>${esc(nombre[id] || 'Lista')}</span><b class="num">${v}</b></div>`).join('')}
+    <div class="row small muted" style="justify-content:space-between"><span>Blancos · nulos · recurridos · impugnados</span><span class="num">${a.blancos || 0} · ${a.nulos || 0} · ${a.recurridos || 0} · ${a.impugnados || 0}</span></div>
+    <div class="row small" style="justify-content:space-between"><b>Total</b><b class="num">${a.total}</b></div>
+    ${a.sumaOk === false ? '<div class="small" style="color:var(--bad)">La suma no coincide con el total.</div>' : ''}</div>`; }).join('');
 }
 
 // ---------------------------------------------------------------- FISCALIZACIÓN (conducción)
 const fiscalesSinAcceso = () => st.personas.filter((p) => p.tipo && p.tipo !== 'votante' && !st.usuarios.some((u) => u.dni === p.dni));
 
-function calcularEscrutinio(fs) {
+function calcularEscrutinio(fs, cat) {
   const porMesa = {};
-  for (const f of fs) if (f.acta && f.mesa) { if (!porMesa[f.mesa] || ms(f.actaAt) > ms(porMesa[f.mesa].actaAt)) porMesa[f.mesa] = f; }
+  for (const f of fs) { const a = catsDeActa(f.acta)[cat]; if (a && f.mesa && (!porMesa[f.mesa] || ms(f.actaAt) > ms(porMesa[f.mesa].actaAt))) porMesa[f.mesa] = { ...f, acta: a }; }
   const mesas = Object.values(porMesa);
   const r = { mesas: mesas.length, tot: {}, blancos: 0, nulos: 0, otros: 0, circ: {} };
   for (const m of mesas) {
@@ -1222,7 +1265,11 @@ function pintarFiscalizacion() {
   const presentes = fs.filter((f) => f.presente).length;
   const incid = fs.reduce((a, f) => a + (f.incidencias || []).length, 0);
   const mesasAsignadas = new Set(fs.map((f) => f.mesa).filter(Boolean)).size;
-  const esc_ = calcularEscrutinio(fs);
+  const cs = categorias();
+  const cat = cs.some((c) => c.id === st.catSel) ? st.catSel : cs[0].id;
+  const nomCat = cs.length > 1 ? ' · ' + cs.find((c) => c.id === cat).nombre : '';
+  const esc_ = calcularEscrutinio(fs, cat);
+  const conActa = new Set(fs.filter((f) => f.mesa && Object.keys(catsDeActa(f.acta)).length).map((f) => f.mesa)).size;
   const circs = Object.keys(esc_.circ).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
   el.innerHTML = `
     <div class="sec-title"><h2>Fiscalización</h2></div>
@@ -1230,10 +1277,12 @@ function pintarFiscalizacion() {
       <div class="tile t-acc"><b>${fs.length}</b><span>fiscales con acceso</span></div>
       <div class="tile ${presentes === fs.length && fs.length ? 't-ok' : 't-warn'}"><b>${presentes}/${fs.length}</b><span>ya están en su mesa</span></div>
       <div class="tile ${incid ? 't-bad' : 't-neutral'}"><b>${incid}</b><span>incidencias</span></div>
-      <div class="tile t-ok"><b>${esc_.mesas}/${mesasAsignadas || 0}</b><span>mesas con acta</span></div>
+      <div class="tile t-ok"><b>${conActa}/${mesasAsignadas || 0}</b><span>mesas con acta</span></div>
     </div>
     ${sinAcceso.length ? `<button class="btn btn-sec" data-act="fiscales-acceso-todos">${ic('fiscal', 18)} Dar acceso a ${sinAcceso.length} ${sinAcceso.length === 1 ? 'fiscal' : 'fiscales'} cargados</button>` : ''}
-    ${esc_.mesas ? `<div class="card pad stack"><div><h3>Resultado parcial · ${esc_.mesas} ${esc_.mesas === 1 ? 'mesa' : 'mesas'}</h3><div class="muted small">Sobre votos válidos (listas + blanco), según las actas que cargaron tus fiscales. No es el resultado oficial.</div></div>
+    ${conActa ? `<div class="card pad stack">
+        ${cs.length > 1 ? `<div class="chips" role="group" aria-label="Categoría">${cs.map((c) => `<button type="button" class="chip" data-act="esc-cat" data-c="${c.id}" aria-pressed="${c.id === cat}">${esc(c.nombre)}</button>`).join('')}</div>` : ''}
+        <div><h3>Resultado parcial${esc(nomCat)} · ${esc_.mesas} ${esc_.mesas === 1 ? 'mesa' : 'mesas'}</h3><div class="muted small">Sobre votos válidos (listas + blanco), según las actas que cargaron tus fiscales. No es el resultado oficial.</div></div>
         ${barrasListas(esc_.tot, esc_.blancos, listas)}
         <div class="muted small">Nulos: ${esc_.nulos} · Recurridos e impugnados: ${esc_.otros}</div>
         ${circs.length > 1 ? `<details class="small" data-recordar="porCirc" ${st.abiertosUI?.porCirc ? 'open' : ''}><summary>Por circuito</summary><div class="stack" style="margin-top:10px">${circs.map((c) => `<div class="stack" style="gap:6px"><b>Circuito ${esc(c)} · ${esc_.circ[c].mesas} mesas</b>${barrasListas(esc_.circ[c].tot, esc_.circ[c].blancos, listas)}</div>`).join('')}</div></details>` : ''}
@@ -1382,11 +1431,17 @@ const acciones = {
     catch (e) { toast(mensajeError(e)); el.disabled = false; }
   },
   'listas-guardar': async () => {
-    const nombres = $('#listas-txt').value.split('\n').map((x) => x.trim()).filter(Boolean);
-    const listas = nombres.map((n) => ({ id: idLista(n), nombre: n }));
-    try { await S.guardarListas(listas); st.me.listas = listas; toast(`${listas.length} listas guardadas`); pintarFiscalizacion(); }
-    catch (e) { toast(mensajeError(e)); }
+    const lineas = (id) => $(id).value.split('\n').map((x) => x.trim()).filter(Boolean);
+    const listas = lineas('#listas-txt').map((n) => ({ id: idLista(n), nombre: n }));
+    const categorias = lineas('#cats-txt').map((n) => ({ id: idLista('cat ' + n), nombre: n }));
+    try {
+      await S.guardarListas(listas, categorias); Object.assign(st.me, { listas, categorias });
+      toast(`${listas.length} listas${categorias.length ? ' y ' + categorias.length + ' categorías' : ''} guardadas`); pintarFiscalizacion();
+    } catch (e) { toast(mensajeError(e)); }
   },
+  'esc-cat': (el) => { st.catSel = el.dataset.c; pintarFiscalizacion(); },
+  'fx-cat': (el) => { st.fx.cat = el.dataset.c; pintarFiscal(); const p = document.querySelector('[data-voto]'); p?.scrollIntoView({ block: 'center' }); },
+  'fx-siguiente': () => { const cs = categorias(); const i = cs.findIndex((c) => c.id === catActual()); st.fx.cat = cs[Math.min(i + 1, cs.length - 1)].id; pintarFiscal(); document.querySelector('[data-voto]')?.focus(); },
   'fiscal-acceso': (el) => hojaAccesoFiscal([el.dataset.dni]),
   'acc-crear': (el) => crearAccesosFiscales(el.dataset.dnis.split(',')),
   'fiscales-acceso-todos': () => hojaAccesoFiscal(fiscalesSinAcceso().map((p) => p.dni)),
@@ -1422,7 +1477,16 @@ const acciones = {
   },
   'fx-foto-otra': () => { st.fx.foto = null; pintarFiscal(); },
   'fx-enviar-acta': enviarActa,
-  'fx-corregir': () => { const f = miFiscalia(); st.fx.corrigiendo = true; st.fx.votos = { ...(f.acta?.votos || {}), blancos: f.acta?.blancos, nulos: f.acta?.nulos, recurridos: f.acta?.recurridos, impugnados: f.acta?.impugnados, total: f.acta?.total }; pintarFiscal(); },
+  'fx-corregir': () => {
+    const h = catsDeActa(miFiscalia().acta); const v = {};
+    for (const [cat, a] of Object.entries(h)) {
+      for (const [id, n] of Object.entries(a.votos || {})) v[cat + '|' + id] = n;
+      ['blancos', 'nulos', 'recurridos', 'impugnados', 'total'].forEach((k) => { v[cat + '|' + k] = a[k]; });
+    }
+    st.fx.votos = v; st.fx.corrigiendo = true;
+    st.fx.cat = (faltanCats(miFiscalia().acta)[0] || categorias()[0]).id;
+    pintarFiscal();
+  },
   'eq-ver-gente': (el) => { st.tab = 'gente'; st.f = { estado: 'todos', q: '', de: el.dataset.uid, limite: 60 }; pintar(); },
   copiar: async (el) => {
     try { await navigator.clipboard.writeText(el.dataset.txt); toast('Mensaje copiado'); }
@@ -1504,6 +1568,16 @@ document.addEventListener('toggle', (e) => {
 }, true);
 
 document.addEventListener('keydown', (e) => {
+  // En el acta, "Siguiente"/Enter pasa al próximo número; al final de una categoría, a la siguiente
+  if (e.key === 'Enter' && e.target.dataset?.voto) {
+    e.preventDefault();
+    const todos = [...document.querySelectorAll('[data-voto]')];
+    const i = todos.indexOf(e.target);
+    if (i < todos.length - 1) { todos[i + 1].focus(); todos[i + 1].select?.(); }
+    else if (document.querySelector('[data-act="fx-siguiente"]')) acciones['fx-siguiente']();
+    else e.target.blur();
+    return;
+  }
   if (e.key === 'Enter' && e.target.id === 'c-dni') { e.preventDefault(); buscarDni(); }
   if (e.key === 'Escape' && sheetCtx) cerrarHoja();
 });
