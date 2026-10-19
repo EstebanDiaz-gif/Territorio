@@ -8,7 +8,7 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore,
   doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where, onSnapshot,
-  writeBatch, serverTimestamp, getCountFromServer
+  writeBatch, serverTimestamp, getCountFromServer, getDocs
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 export const modo = 'firebase';
@@ -148,7 +148,39 @@ export async function importarPadron(registros, onProgreso) {
     hechos += claves.slice(i, i + 200).reduce((a, k) => a + Object.keys(grupos[k]).length, 0);
     onProgreso?.(hechos, registros.length);
   }
+  await setDoc(D('padron', 'resumen'), { circuitos: resumirPadron(registros) }, { merge: true });
   baldes.clear();
+}
+
+// Resumen del padrón: electores por circuito y por escuela (para el tablero)
+function resumirPadron(registros) {
+  const c = {};
+  for (const r of registros) {
+    const x = (c[r.circuito || '–'] ||= { e: 0, esc: {} });
+    x.e++;
+    const n = r.escuela || 'Sin escuela';
+    x.esc[n] = (x.esc[n] || 0) + 1;
+  }
+  const out = {};
+  for (const k in c) out[k] = { e: c[k].e, esc: Object.entries(c[k].esc).map(([n, e]) => ({ n, e })) };
+  return out;
+}
+export async function leerResumenPadron() {
+  const s = await getDoc(D('padron', 'resumen'));
+  return s.exists() ? (s.data().circuitos || null) : null;
+}
+// Para padrones subidos antes de que existiera el resumen (lee el padrón entero una vez)
+export async function recalcularResumenPadron() {
+  const snap = await getDocs(C('padron'));
+  const regs = [];
+  snap.forEach((d) => {
+    if (d.id === 'resumen') return;
+    const v = d.data().v || {};
+    for (const dni in v) regs.push(padronDeString(dni, v[dni]));
+  });
+  const circuitos = resumirPadron(regs);
+  await setDoc(D('padron', 'resumen'), { circuitos });
+  return regs.length ? circuitos : null;
 }
 
 export function padronCantidad() { return null; }
@@ -242,7 +274,7 @@ export function borrarPersonas(dnis, onProgreso) {
   return borrarEnTandas(dnis.map((d) => D('personas', d)), onProgreso);
 }
 export async function borrarPadron(onProgreso) {
-  const refs = Array.from({ length: 1000 }, (_, i) => D('padron', String(i).padStart(3, '0')));
+  const refs = [...Array.from({ length: 1000 }, (_, i) => D('padron', String(i).padStart(3, '0'))), D('padron', 'resumen')];
   await borrarEnTandas(refs, onProgreso);
   baldes.clear();
 }

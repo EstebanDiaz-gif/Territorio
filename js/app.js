@@ -113,6 +113,7 @@ function iniciarSesion(me) {
   st.tab = 'gente';
   st.f = { estado: 'todos', q: '', de: '', limite: 60 };
   st.c = { fase: 'inicio' };
+  st.resumen = undefined; st.circAbiertos = null; st.abiertos = null;
   st.unsubs.forEach((u) => u());
   st.unsubs = [
     S.watchUsuarios((x) => { st.usuarios = x; refrescar(); }),
@@ -254,7 +255,7 @@ function refrescarPartes() {
   if (st.tab === 'gente') pintarLista();
   if (st.tab === 'dia') pintarDia();
   if (st.tab === 'equipo') pintarEquipo();
-  if (st.tab === 'panel') { pintarTablero(); pintarConflictos(); }
+  if (st.tab === 'panel') { cargarResumen(); pintarTablero(); pintarConflictos(); }
 }
 
 // ---------------------------------------------------------------- GENTE
@@ -747,7 +748,6 @@ function pintarTablero() {
   const s = stats(st.personas);
   const porCirc = {};
   for (const p of st.personas) { const k = p.circuito || '–'; porCirc[k] ||= [0, 0]; porCirc[k][0]++; if (p.voto) porCirc[k][1]++; }
-  const circs = Object.entries(porCirc).sort((a, b) => a[0].localeCompare(b[0], 'es', { numeric: true }));
   const rolRanking = st.me.rol === 'cabeza' ? 'encargado' : rolAbajo(st.me.rol);
   const cont = conteoPorUsuario();
   const ranking = st.usuarios.filter((u) => u.rol === rolRanking && (st.me.rol === 'cabeza' || u.parentId === st.me.uid))
@@ -762,14 +762,64 @@ function pintarTablero() {
       <div class="tile t-neutral"><b>${s.fisc}</b><span>fiscales</span></div>
       <div class="tile ${s.rev ? 't-warn' : 't-neutral'}"><b>${s.rev}</b><span>con datos a revisar</span></div>
     </div>
-    ${circs.length ? `<div class="card pad stack"><h3>Votación por circuito</h3>
-      ${circs.map(([k, [n, v]]) => `<div><div class="row small" style="justify-content:space-between"><b>Circuito ${esc(k)}</b><span class="muted num">${v} de ${n} · ${pct(v, n)}%</span></div><div class="bar" style="margin-top:5px"><i style="width:${pct(v, n)}%"></i></div></div>`).join('')}
-    </div>` : ''}
+    ${bloqueCircuitos(porCirc)}
     ${ranking.length ? `<div class="card"><div class="escuela-h"><h3 class="grow">${ROL_CORTO[rolRanking]}s</h3><span class="muted small">votaron / cargados</span></div>
       ${ranking.map(({ u, n, v }) => `<div class="miembro"><div class="ini rol-${u.rol}">${esc(iniciales(u.nombre))}</div>
         <div class="grow"><div style="font-weight:600">${esc(u.nombre)}</div><div class="muted small">${u.circuito ? 'Circuito ' + esc(u.circuito) : ''}</div></div>
         <span class="num" style="font-weight:700">${v}/${n}</span><span class="pill ${pct(v, n) >= 60 ? 'p-ok' : 'p-warn'}">${pct(v, n)}%</span></div>`).join('')}
     </div>` : ''}`;
+}
+
+function bloqueCircuitos(porCirc) {
+  const res = st.resumen || {};
+  const cab = st.me.rol === 'cabeza';
+  const claves = new Set(Object.keys(porCirc));
+  if (cab) Object.keys(res).forEach((k) => claves.add(k));
+  else if (st.me.circuito) claves.add(st.me.circuito);
+  const lista = [...claves].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  if (!lista.length) return '';
+  st.circAbiertos ||= new Set();
+  const fmt = (x) => x.toLocaleString('es-AR');
+  const barra = (v, n) => `<div class="bar"><i style="width:${pct(v, n)}%"></i></div>`;
+  const filas = lista.map((k) => {
+    const [n, v] = porCirc[k] || [0, 0];
+    const e = res[k]?.e;
+    const abierto = st.circAbiertos.has(k);
+    let html = `<button type="button" class="circ-btn" data-act="circ-toggle" data-c="${esc(k)}" aria-expanded="${abierto}">
+      <span class="row" style="justify-content:space-between;gap:8px">
+        <span><span class="chev" aria-hidden="true">${abierto ? '▾' : '▸'}</span> <b>Circuito ${esc(k)}</b></span>
+        <span class="num small"><b>${pct(v, n)}%</b> <span class="muted">· ${fmt(v)} de ${fmt(n)} votaron</span></span>
+      </span>
+      ${barra(v, n)}
+      <span class="muted small" style="display:block">${fmt(n)} cargados${e ? ` de ${fmt(e)} electores en el padrón` : ''}</span>
+    </button>`;
+    if (!abierto) return html;
+    const escs = {};
+    for (const p of st.personas) {
+      if ((p.circuito || '–') !== k) continue;
+      const x = (escs[p.escuela || 'Sin escuela'] ||= { n: 0, v: 0, e: 0 });
+      x.n++; if (p.voto) x.v++;
+    }
+    for (const r of res[k]?.esc || []) (escs[r.n] ||= { n: 0, v: 0, e: 0 }).e = r.e;
+    const nombres = Object.keys(escs).sort((a, b) => escs[b].n - escs[a].n || a.localeCompare(b));
+    html += `<div class="circ-esc">${nombres.map((nm) => {
+      const x = escs[nm];
+      return `<div><div class="row small" style="justify-content:space-between;gap:8px"><span style="font-weight:600">${esc(nm)}</span>
+        <span class="num"><b>${pct(x.v, x.n)}%</b> <span class="muted">· ${fmt(x.v)}/${fmt(x.n)}</span></span></div>
+        ${barra(x.v, x.n)}${x.e ? `<div class="muted small">${fmt(x.e)} electores</div>` : ''}</div>`;
+    }).join('')}</div>`;
+    return html;
+  }).join('');
+  return `<div class="card pad stack"><div><h3>Votación por circuito</h3><div class="muted small">Porcentaje de tu gente cargada que ya votó. Tocá un circuito para ver sus escuelas.</div></div>
+    ${filas}
+    ${cab && st.resumen === null ? '<button class="btn btn-ghost btn-sm" data-act="circ-recalcular">Mostrar todos los circuitos del padrón</button>' : ''}
+  </div>`;
+}
+
+function cargarResumen(forzar = false) {
+  if (!forzar && st.resumen !== undefined) return;
+  st.resumen = st.resumen ?? null;
+  S.leerResumenPadron().then((r) => { st.resumen = r; pintarTablero(); }).catch(() => {});
 }
 
 function pintarConflictos() {
@@ -902,6 +952,7 @@ async function confirmarPadron() {
     });
     st.pad = null;
     $('#pad-file').value = '';
+    cargarResumen(true);
     res.innerHTML = `<div class="aviso ok">${ic('ok', 18)}<span>Padrón cargado: ${m.registros.length.toLocaleString('es-AR')} electores.</span></div>`;
   } catch (e) {
     res.innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>${esc(mensajeError(e))}</span></div>`;
@@ -985,6 +1036,12 @@ const acciones = {
       el.disabled = false; el.textContent = 'Quitar';
     }
   },
+  'circ-toggle': (el) => { const k = el.dataset.c; if (st.circAbiertos.has(k)) st.circAbiertos.delete(k); else st.circAbiertos.add(k); pintarTablero(); },
+  'circ-recalcular': async (el) => {
+    el.disabled = true; el.textContent = 'Leyendo el padrón…';
+    try { st.resumen = await S.recalcularResumenPadron(); pintarTablero(); if (!st.resumen) toast('No hay padrón cargado'); }
+    catch (e) { toast(mensajeError(e)); el.disabled = false; }
+  },
   'eq-ver-gente': (el) => { st.tab = 'gente'; st.f = { estado: 'todos', q: '', de: el.dataset.uid, limite: 60 }; pintar(); },
   copiar: async (el) => {
     try { await navigator.clipboard.writeText(el.dataset.txt); toast('Mensaje copiado'); }
@@ -1004,7 +1061,7 @@ const acciones = {
         await S.borrarPersonas(dnis, prog);
         // Los conflictos pendientes ya no tienen sentido: se cierran
         for (const c of st.conflictos.filter((x) => x.estado === 'intento' || x.estado === 'reclamo')) { try { await S.resolverConflicto(c, false); } catch { /* sigue */ } }
-      } else await S.borrarPadron(prog);
+      } else { await S.borrarPadron(prog); st.resumen = null; pintarTablero(); }
       $('#borrar-ok').value = '';
       res.innerHTML = `<div class="aviso ok">${ic('ok', 18)}<span>${que === 'personas' ? `Listo: se borraron ${dnis.length.toLocaleString('es-AR')} personas.` : 'Listo: se borró el padrón.'}</span></div>`;
     } catch (e) {

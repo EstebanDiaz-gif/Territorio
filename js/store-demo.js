@@ -111,6 +111,21 @@ export async function importarPadron(registros, onProgreso) {
   guardar();
   onProgreso?.(registros.length, registros.length);
 }
+export async function leerResumenPadron() {
+  const c = {};
+  for (const b of Object.values(db.padron)) for (const dni in b) {
+    const r = padronDeString(dni, b[dni]);
+    const x = (c[r.circuito || '–'] ||= { e: 0, esc: {} });
+    x.e++;
+    const n = r.escuela || 'Sin escuela';
+    x.esc[n] = (x.esc[n] || 0) + 1;
+  }
+  const out = {};
+  for (const k in c) out[k] = { e: c[k].e, esc: Object.entries(c[k].esc).map(([n, e]) => ({ n, e })) };
+  return Object.keys(out).length ? out : null;
+}
+export const recalcularResumenPadron = leerResumenPadron;
+
 export function padronCantidad() {
   return Object.values(db.padron).reduce((a, b) => a + Object.keys(b).length, 0);
 }

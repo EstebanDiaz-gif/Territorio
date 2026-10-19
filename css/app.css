@@ -250,3 +250,7 @@ nav.tabs button[aria-current="page"] { color: var(--accent); font-weight: 700; }
 .chev { width: 16px; color: var(--muted); font-size: 14px; flex: none; }
 .gente-de { display: flex; flex-direction: column; gap: 6px; padding: 8px 14px 12px; background: var(--bg); border-bottom: 1px solid var(--line-2); }
 .gente-item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 8px 12px; min-height: 48px; font-size: 14px; font-weight: 600; color: inherit; }
+
+/* Votación por circuito desplegable */
+.circ-btn { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line-2); background: transparent; padding: 10px 0 4px; color: inherit; }
+.circ-esc { display: flex; flex-direction: column; gap: 10px; padding: 8px 0 8px 22px; border-left: 2px solid var(--line); margin-left: 6px; }
