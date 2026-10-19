@@ -42,11 +42,11 @@ service cloud.firestore {
             && request.resource.data.path == [uid])
           // otra cabeza, creada por una cabeza
           || (esCabeza() && request.resource.data.rol == 'cabeza' && request.resource.data.path == [uid])
-          // alguien del nivel de abajo, creado por su superior directo
+          // alguien un nivel debajo de su superior; lo crea ese superior, alguien por encima de él o una cabeza
           || (miembro()
-            && nivel(request.resource.data.rol) == nivel(yo().rol) + 1
-            && request.resource.data.parentId == request.auth.uid
-            && request.resource.data.path == yo().path.concat([uid]))
+            && nivel(request.resource.data.rol) == nivel(usuario(request.resource.data.parentId).rol) + 1
+            && request.resource.data.path == usuario(request.resource.data.parentId).path.concat([uid])
+            && (esCabeza() || enMiEquipo(usuario(request.resource.data.parentId).path)))
         );
         allow update: if miembro() && (esCabeza() || (enMiEquipo(resource.data.path) && request.auth.uid != uid))
           && soloCambia(['nombre', 'tel', 'activo']);

@@ -71,7 +71,8 @@ export async function crearCampania({ campania, nombre, dni, pass, tel }) {
 // ---------- Usuarios ----------
 // Para crear la cuenta de otra persona sin cerrar la sesión propia se usa una segunda instancia de Firebase
 let secundaria = null;
-export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito }) {
+export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre }) {
+  const sup = padre || me;
   secundaria ||= initializeApp(FIREBASE_CONFIG, 'secundaria');
   const sAuth = getAuth(secundaria);
   let uid;
@@ -92,9 +93,9 @@ export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito }) {
   const esCabeza = rol === 'cabeza';
   await setDoc(D('usuarios', uid), {
     uid, dni, nombre, tel: tel || '', rol,
-    parentId: esCabeza ? null : me.uid,
-    path: esCabeza ? [uid] : [...me.path, uid],
-    circuito: circuito || me.circuito || '',
+    parentId: esCabeza ? null : sup.uid,
+    path: esCabeza ? [uid] : [...sup.path, uid],
+    circuito: circuito || sup.circuito || '',
     creado: serverTimestamp()
   });
   if (reactivado) await deleteDoc(D('bajas', dni));

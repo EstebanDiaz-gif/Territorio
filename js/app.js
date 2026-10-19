@@ -609,7 +609,7 @@ function pintarEquipo() {
           <span class="small num" style="display:block"><b>${n}</b> cargados · <b>${v}</b> votaron${n ? ` · ${pct(v, n)}%` : ''}</span></span>
       </button>
       ${wa && u.uid !== st.me.uid ? `<a class="icon-btn wa" href="${wa}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(u.nombre)}">${ic('wa')}</a>` : ''}
-      ${u.uid !== st.me.uid ? `<button type="button" class="icon-btn" data-act="eq-opciones" data-uid="${u.uid}" aria-label="Opciones de ${esc(u.nombre)}">${ic('mas3')}</button>` : ''}
+      ${u.uid !== st.me.uid ? `<button type="button" class="icon-btn" data-act="eq-opciones" data-uid="${u.uid}" aria-label="Opciones de ${esc(u.nombre)}: agregar a su equipo o quitar">${ic('mas3')}</button>` : ''}
     </div>`;
     if (!abierto) return html;
     if (subs.length) return html + subs.map((h) => fila(h, prof + 1)).join('');
@@ -637,6 +637,7 @@ function hojaQuitarUsuario(uid) {
     <div class="row"><div class="ini rol-${u.rol}" style="width:48px;height:48px;border-radius:24px">${esc(iniciales(u.nombre))}</div>
       <div class="grow"><h2>${esc(u.nombre)}</h2><div class="muted num">${ROL_LABEL[u.rol]} · DNI ${fmtDni(u.dni)}</div></div>
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    ${rolAbajo(u.rol) ? `<button class="btn btn-full" data-act="nuevo-usuario" data-rol="${rolAbajo(u.rol)}" data-padre="${u.uid}">${ic('mas')} Agregar ${ROL_CORTO[rolAbajo(u.rol)].toLowerCase()} a su equipo</button>` : ''}
     ${debajo.length ? `<div class="aviso warn">${ic('alerta', 18)}<span>Tiene ${debajo.length} ${debajo.length === 1 ? 'persona' : 'personas'} en su equipo. Para quitarlo, primero quitá a los que tiene debajo.</span></div>` : `
     <div class="card pad stack">
       <h3>Quitar del equipo</h3>
@@ -651,11 +652,12 @@ function hojaQuitarUsuario(uid) {
     </div>`}`, { tipo: 'usuario' });
 }
 
-function hojaNuevoUsuario(rol) {
+function hojaNuevoUsuario(rol, padreUid) {
   const clave = String(Math.floor(100000 + Math.random() * 900000));
+  const padre = padreUid ? usuarioPorId(padreUid) : null;
   abrirHoja(`
-    <div class="row"><h2 class="grow">Agregar ${ROL_CORTO[rol].toLowerCase()}</h2><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
-    <form id="f-usuario" class="stack" data-rol="${rol}" autocomplete="off">
+    <div class="row"><div class="grow"><h2>Agregar ${ROL_CORTO[rol].toLowerCase()}</h2>${padre ? `<div class="muted">Al equipo de ${esc(padre.nombre)}</div>` : ''}</div><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    <form id="f-usuario" class="stack" data-rol="${rol}" data-padre="${padre ? padre.uid : ''}" autocomplete="off">
       <div><label class="label" for="nu-nom">Nombre y apellido</label><input id="nu-nom" class="input" required maxlength="60"></div>
       <div><label class="label" for="nu-dni">DNI (con esto entra a la app)</label><input id="nu-dni" class="input" inputmode="numeric" required></div>
       <div><label class="label" for="nu-tel">Teléfono</label><input id="nu-tel" class="input" inputmode="tel" placeholder="381…"></div>
@@ -669,6 +671,7 @@ function hojaNuevoUsuario(rol) {
 
 async function crearUsuario(form) {
   const rol = form.dataset.rol;
+  const padre = form.dataset.padre ? usuarioPorId(form.dataset.padre) : null;
   const nombre = $('#nu-nom').value.trim();
   const dni = normDni($('#nu-dni').value);
   const tel = normDni($('#nu-tel').value);
@@ -686,12 +689,12 @@ async function crearUsuario(form) {
   const btn = form.querySelector('button[type=submit]');
   btn.disabled = true; btn.textContent = 'Creando…';
   try {
-    const r = await S.crearUsuario({ dni, nombre, tel, rol, pass, circuito });
+    const r = await S.crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre });
     const link = location.origin + location.pathname;
     const msg = `Hola ${primerNombre(nombre)}! Ya tenés acceso a ${APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? ' del circuito ' + circuito : ''}.\nEntrá en ${link}\nDNI: ${dni}\nContraseña: ${r?.reactivado ? 'la misma que usabas antes' : pass}`;
     const wa = waUrl(tel, msg);
     hojaHtml(`
-      <div class="aviso ok">${ic('ok', 18)}<span>${esc(nombre)} ya puede entrar.</span></div>
+      <div class="aviso ok">${ic('ok', 18)}<span>${esc(nombre)} ya puede entrar${padre ? ' · quedó en el equipo de ' + esc(padre.nombre) : ''}.</span></div>
       <div class="card pad stack"><div class="muted small">Mandale este mensaje:</div><div style="white-space:pre-line" id="nu-msg">${esc(msg)}</div></div>
       ${wa ? `<a class="btn btn-full" href="${wa}" target="_blank" rel="noopener">${ic('wa')} Enviar por WhatsApp</a>` : ''}
       <button class="btn btn-sec" data-act="copiar" data-txt="${esc(msg)}">Copiar mensaje</button>
@@ -964,7 +967,7 @@ const acciones = {
     await S.actualizarPersona(p.dni, { voto: !p.voto, votoAt: p.voto ? null : Date.now() });
   },
   'dia-solo': (el) => { st.dia.solo = el.dataset.v; pintarDia(); },
-  'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol),
+  'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol, el.dataset.padre || null),
   'eq-toggle': (el) => { const id = el.dataset.uid; if (st.abiertos.has(id)) st.abiertos.delete(id); else st.abiertos.add(id); pintarEquipo(); },
   'eq-opciones': (el) => hojaQuitarUsuario(el.dataset.uid),
   'eq-quitar': async (el) => {

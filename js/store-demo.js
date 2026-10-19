@@ -65,17 +65,18 @@ export function watchUsuarios(cb) {
   return () => subs.delete(f);
 }
 
-export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito }) {
+export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre }) {
+  const sup = padre || me;
   await espera();
   if (Object.values(db.usuarios).some((u) => u.dni === dni)) throw err('auth/email-already-in-use', 'Ese DNI ya tiene usuario');
   const esCabeza = rol === 'cabeza';
-  if (esCabeza ? me.rol !== 'cabeza' : nivel(rol) !== nivel(me.rol) + 1) throw err('permission-denied', 'No podés crear ese rol');
+  if (esCabeza ? me.rol !== 'cabeza' : (nivel(rol) !== nivel(sup.rol) + 1 || !(me.rol === 'cabeza' || sup.path.includes(me.uid)))) throw err('permission-denied', 'No podés crear ese rol');
   const uid = 'u' + Math.random().toString(36).slice(2, 9);
   db.usuarios[uid] = {
     uid, dni, nombre, tel: tel || '', rol,
-    parentId: esCabeza ? null : me.uid,
-    path: esCabeza ? [uid] : [...me.path, uid],
-    circuito: circuito || me.circuito || '',
+    parentId: esCabeza ? null : sup.uid,
+    path: esCabeza ? [uid] : [...sup.path, uid],
+    circuito: circuito || sup.circuito || '',
     creado: ahora()
   };
   db.claves[uid] = pass;
