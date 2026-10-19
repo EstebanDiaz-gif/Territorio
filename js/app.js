@@ -578,24 +578,51 @@ function pintarEquipo() {
   const el = $('#equipo');
   if (!el) return;
   const cont = conteoPorUsuario();
-  const todos = st.me.rol === 'cabeza' ? st.usuarios : st.usuarios.filter((u) => u.path.includes(st.me.uid));
-  const arbol = ordenarArbol(todos);
-  const base = st.me.rol === 'cabeza' ? 0 : nivel(st.me.rol);
-  if (arbol.length <= 1 && st.me.rol !== 'cabeza') {
-    el.innerHTML = `<div class="card vacio">Todavía no agregaste a nadie a tu equipo.</div>`;
+  const visibles = st.me.rol === 'cabeza' ? st.usuarios : st.usuarios.filter((u) => u.path.includes(st.me.uid));
+  const ids = new Set(visibles.map((u) => u.uid));
+  const hijos = {};
+  for (const u of visibles) {
+    const padre = u.parentId && ids.has(u.parentId) ? u.parentId : '__raiz';
+    (hijos[padre] ||= []).push(u);
+  }
+  for (const k in hijos) hijos[k].sort((a, b) => nivel(a.rol) - nivel(b.rol) || a.nombre.localeCompare(b.nombre));
+  if (!st.abiertos) st.abiertos = new Set([st.me.uid]);
+  const raices = st.me.rol === 'cabeza' ? (hijos.__raiz || []) : [st.me];
+  if (!(hijos[st.me.uid] || []).length && st.me.rol !== 'cabeza') {
+    el.innerHTML = '<div class="card vacio">Todavía no agregaste a nadie a tu equipo.</div>';
     return;
   }
-  el.innerHTML = `<div class="card">${arbol.map((u) => {
+  const fila = (u, prof) => {
     const [n, v] = cont[u.uid] || [0, 0];
-    const prof = Math.max(0, nivel(u.rol) - base);
+    const subs = hijos[u.uid] || [];
+    const abierto = st.abiertos.has(u.uid);
     const wa = waUrl(u.tel);
-    return `<div class="miembro" style="padding-left:${14 + prof * 18}px">
-      <div class="ini rol-${u.rol}">${esc(iniciales(u.nombre))}</div>
-      <div class="grow"><div style="font-weight:700">${esc(u.nombre)}${u.uid === st.me.uid ? ' <span class="muted">(vos)</span>' : ''}</div>
-        <div class="muted small">${ROL_CORTO[u.rol]}${u.circuito ? ' · Circ. ' + esc(u.circuito) : ''} · <span class="num">${n} cargados · ${v} votaron</span></div></div>
+    const PLURAL = { cabeza: 'cabezas', encargado: 'encargados', dirigente: 'dirigentes', movilizador: 'movilizadores' };
+    const detalle = subs.length ? `${subs.length} ${subs.length === 1 ? ROL_CORTO[subs[0].rol].toLowerCase() : PLURAL[subs[0].rol]}` : '';
+    let html = `<div class="miembro" style="padding-left:${10 + prof * 18}px">
+      <button type="button" class="miembro-btn" data-act="eq-toggle" data-uid="${u.uid}" aria-expanded="${abierto}">
+        <span class="chev" aria-hidden="true">${abierto ? '▾' : '▸'}</span>
+        <span class="ini rol-${u.rol}">${esc(iniciales(u.nombre))}</span>
+        <span class="grow" style="text-align:left"><span style="display:block;font-weight:700">${esc(u.nombre)}${u.uid === st.me.uid ? ' <span class="muted">(vos)</span>' : ''}</span>
+          <span class="muted small" style="display:block">${ROL_CORTO[u.rol]}${u.circuito ? ' · Circ. ' + esc(u.circuito) : ''}${detalle ? ' · ' + detalle : ''}</span>
+          <span class="small num" style="display:block"><b>${n}</b> cargados · <b>${v}</b> votaron${n ? ` · ${pct(v, n)}%` : ''}</span></span>
+      </button>
       ${wa && u.uid !== st.me.uid ? `<a class="icon-btn wa" href="${wa}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(u.nombre)}">${ic('wa')}</a>` : ''}
     </div>`;
-  }).join('')}</div>`;
+    if (!abierto) return html;
+    if (subs.length) return html + subs.map((h) => fila(h, prof + 1)).join('');
+    // Sin equipo debajo: mostramos su gente
+    const gente = st.personas.filter((p) => p.ownerId === u.uid).sort((a, b) => String(a.nombre).localeCompare(b.nombre));
+    html += `<div class="gente-de" style="padding-left:${14 + prof * 8}px">`;
+    if (!gente.length) html += '<div class="muted small">Todavía no cargó a nadie.</div>';
+    html += gente.slice(0, 30).map((p) => `<button type="button" class="gente-item" data-act="ver" data-dni="${p.dni}">
+        <span class="grow" style="text-align:left">${esc(p.nombre)}<span class="muted small" style="display:block">${p.escuela ? esc(p.escuela) + ' · ' : ''}${p.mesa ? 'Mesa ' + esc(p.mesa) : ''}</span></span>
+        <span class="pill ${p.voto ? 'p-ok' : 'p-' + esc(p.estado)}">${p.voto ? 'Votó' : esc(ESTADO_LABEL[p.estado] || '')}</span></button>`).join('');
+    if (gente.length > 30) html += `<button type="button" class="btn btn-ghost btn-sm" data-act="eq-ver-gente" data-uid="${u.uid}">Ver las ${gente.length} personas</button>`;
+    return html + '</div>';
+  };
+  el.innerHTML = `<div class="card">${raices.map((u) => fila(u, 0)).join('')}</div>
+    <div class="muted small">Tocá un nombre para ver su equipo. En los movilizadores se ve su gente.</div>`;
 }
 
 function hojaNuevoUsuario(rol) {
@@ -905,6 +932,8 @@ const acciones = {
   },
   'dia-solo': (el) => { st.dia.solo = el.dataset.v; pintarDia(); },
   'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol),
+  'eq-toggle': (el) => { const id = el.dataset.uid; if (st.abiertos.has(id)) st.abiertos.delete(id); else st.abiertos.add(id); pintarEquipo(); },
+  'eq-ver-gente': (el) => { st.tab = 'gente'; st.f = { estado: 'todos', q: '', de: el.dataset.uid, limite: 60 }; pintar(); },
   copiar: async (el) => {
     try { await navigator.clipboard.writeText(el.dataset.txt); toast('Mensaje copiado'); }
     catch { const r = document.createRange(); r.selectNodeContents($('#nu-msg')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Seleccioná y copiá el texto'); }
