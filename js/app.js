@@ -498,7 +498,7 @@ function vistaCargar() {
         <button type="button" class="btn" data-act="c-buscar" style="min-height:52px">Buscar</button>
       </div>
       <div class="muted small">Con o sin puntos. Al buscar se completan los datos del padrón.</div>
-      ${DEMO ? '<div class="muted small">Para probar: <b>38512004</b> (libre) · <b>22731880</b> (ya es de otro movilizador) · <b>12345678</b> (no está en el padrón)</div>' : ''}
+      ${DEMO ? '<div class="muted small demo-tip">Para probar: <b>38512004</b> (libre) · <b>22731880</b> (ya es de otro movilizador) · <b>12345678</b> (no está en el padrón)</div>' : ''}
     </div>
     <div id="c-res" class="stack">${resultadoCargar()}</div>`;
 }
