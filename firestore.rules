@@ -57,7 +57,7 @@ service cloud.firestore {
             && (esCabeza() || enMiEquipo(usuario(request.resource.data.parentId).path)))
         );
         allow update: if gestor() && (esCabeza() || (enMiEquipo(resource.data.path) && request.auth.uid != uid))
-          && soloCambia(['nombre', 'tel', 'activo']);
+          && soloCambia(['nombre', 'tel', 'activo', 'circuito']);
         // Quitar a alguien: una cabeza, o un superior de esa persona
         allow delete: if gestor() && request.auth.uid != uid && (esCabeza() || enMiEquipo(resource.data.path));
       }

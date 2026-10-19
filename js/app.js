@@ -1,7 +1,7 @@
 import { APP_NAME, FIREBASE_CONFIG, ZONA } from './config.js';
 import {
   ROLES, ROL_LABEL, ROL_CORTO, nivel, rolAbajo, ESTADOS, ESTADO_LABEL, TIPOS, TIPO_LABEL,
-  normDni, dniValido, fmtDni, telWhatsApp, idLista, palabrasDe
+  normDni, dniValido, fmtDni, telWhatsApp, idLista, palabrasDe, circuitosDe, unCircuito, textoCircuitos
 } from './roles.js';
 import { leerArchivo, mapearPersonas, mapearPadron, exportarExcel, NOMBRE_COLUMNA } from './importers.js';
 
@@ -340,7 +340,7 @@ function pintarTop() {
   const me = st.me;
   const s = statsGlobal();
   const titulos = { gente: esMov() ? 'Mi gente' : 'Gente del equipo', cargar: 'Cargar persona', dia: 'Día de elección', equipo: 'Equipo', panel: 'Panel' };
-  const sub = `${ROL_LABEL[me.rol]}${me.circuito ? ' · Circuito ' + esc(me.circuito) : ''} · ${esc(me.campania || '')}`;
+  const sub = `${ROL_LABEL[me.rol]}${me.circuito ? ' · ' + esc(textoCircuitos(me, true)) : ''} · ${esc(me.campania || '')}`;
   let extra = '';
   if (st.tab === 'gente') {
     extra = `<div class="kpis">
@@ -547,7 +547,9 @@ function resultadoCargar() {
   }
   // libre
   const pd = c.padron;
-  const otroCirc = pd && st.me.circuito && pd.circuito && pd.circuito !== st.me.circuito;
+  const misCircs = circuitosDe(st.me);
+  const sinCeros = (c) => String(c).replace(/^0+(?=.)/, '');
+  const otroCirc = pd && misCircs.length && pd.circuito && !misCircs.map(sinCeros).includes(sinCeros(normDni(pd.circuito) || pd.circuito));
   const duenos = esMov() ? [] : [st.me, ...miEquipo()];
   return `
     ${pd ? `<div class="card">
@@ -561,7 +563,7 @@ function resultadoCargar() {
         <div><dt>Domicilio</dt><dd>${esc(pd.domicilio || '–')}</dd></div>
       </dl>
     </div>
-    ${otroCirc ? `<div class="aviso warn">${ic('alerta', 18)}<span>Vota en el circuito ${esc(pd.circuito)}, no en el tuyo (${esc(st.me.circuito)}). Podés cargarla igual.</span></div>` : ''}`
+    ${otroCirc ? `<div class="aviso warn">${ic('alerta', 18)}<span>Vota en el circuito ${esc(pd.circuito)}, no en ${misCircs.length > 1 ? 'los tuyos' : 'el tuyo'} (${esc(misCircs.join(', '))}). Podés cargarla igual.</span></div>` : ''}`
     : `<div class="aviso warn">${ic('alerta', 18)}<span>No figura en el padrón cargado. Podés cargarla igual y queda marcada para revisar.</span></div>
        <div class="card pad"><label class="label" for="c-nombre">Nombre y apellido</label><input id="c-nombre" class="input" maxlength="80"></div>`}
     <div class="card pad stack">
@@ -613,7 +615,7 @@ async function guardarCarga() {
   const dueno = usuarioPorId($('#c-dueno')?.value) || st.me;
   const datos = {
     dni: c.dni, nombre,
-    domicilio: pd?.domicilio || '', circuito: pd?.circuito || dueno.circuito || '', escuela: pd?.escuela || '',
+    domicilio: pd?.domicilio || '', circuito: pd?.circuito || unCircuito(dueno) || '', escuela: pd?.escuela || '',
     dirEscuela: pd?.dirEscuela || '', mesa: pd?.mesa || '', orden: pd?.orden || '',
     tel: normDni($('#c-tel').value), estado: c.estado, tipo: $('#c-tipo').value,
     enPadron: !!pd, revisar: !pd, nota: pd ? '' : 'Revisar: no figura en el padrón'
@@ -765,7 +767,7 @@ function pintarEquipo() {
         <span class="chev" aria-hidden="true">${abierto ? '▾' : '▸'}</span>
         <span class="ini rol-${u.rol}">${esc(iniciales(u.nombre))}</span>
         <span class="grow" style="text-align:left"><span style="display:block;font-weight:700">${esc(u.nombre)}${u.uid === st.me.uid ? ' <span class="muted">(vos)</span>' : ''}</span>
-          <span class="muted small" style="display:block">${ROL_CORTO[u.rol]}${u.circuito ? ' · Circ. ' + esc(u.circuito) : ''}${detalle ? ' · ' + detalle : ''}</span>
+          <span class="muted small" style="display:block">${ROL_CORTO[u.rol]}${u.circuito ? ' · ' + esc(textoCircuitos(u, true)) : ''}${detalle ? ' · ' + detalle : ''}</span>
           <span class="small num" style="display:block"><b>${fmtN(n)}</b> cargados · <b>${fmtN(v)}</b> votaron${n ? ` · ${pct(v, n)}%` : ''}</span></span>
       </button>
       ${wa && u.uid !== st.me.uid ? `<a class="icon-btn wa" href="${wa}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(u.nombre)}">${ic('wa')}</a>` : ''}
@@ -801,6 +803,13 @@ function hojaQuitarUsuario(uid) {
       <div class="grow"><h2>${esc(u.nombre)}</h2><div class="muted num">${ROL_LABEL[u.rol]} · DNI ${fmtDni(u.dni)}</div></div>
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
     ${rolAbajo(u.rol) ? `<button class="btn btn-full" data-act="nuevo-usuario" data-rol="${rolAbajo(u.rol)}" data-padre="${u.uid}">${ic('mas')} Agregar ${ROL_CORTO[rolAbajo(u.rol)].toLowerCase()} a su equipo</button>` : ''}
+    ${u.rol !== 'cabeza' ? `<div class="card pad stack">
+      <div><label class="label" for="qu-circ">Circuitos a cargo</label>
+        <input id="qu-circ" class="input" inputmode="text" autocomplete="off" value="${esc(circuitosDe(u).join(', '))}" placeholder="Ej: 19, 20">
+        <div class="muted small">Si maneja más de uno, separalos con coma.${st.usuarios.some((x) => x.uid !== u.uid && x.path.includes(u.uid)) ? ' Su equipo toma los mismos circuitos.' : ''}</div></div>
+      <div class="error" id="qu-circ-err" role="alert"></div>
+      <button class="btn btn-sec" data-act="eq-circ" data-uid="${u.uid}">Guardar circuitos</button>
+    </div>` : ''}
     ${S.puedeBlanquear ? `<button class="btn btn-sec btn-full" data-act="blanquear" data-uid="${u.uid}">${ic('llave', 18)} Se olvidó la contraseña: blanquear</button>` : ''}
     ${debajo.length ? `<div class="aviso warn">${ic('alerta', 18)}<span>Tiene ${debajo.length} ${debajo.length === 1 ? 'persona' : 'personas'} en su equipo. Para quitarlo, primero quitá a los que tiene debajo.</span></div>` : `
     <div class="card pad stack">
@@ -825,7 +834,7 @@ function hojaNuevoUsuario(rol, padreUid) {
       <div><label class="label" for="nu-nom">Nombre y apellido</label><input id="nu-nom" class="input" required maxlength="60"></div>
       <div><label class="label" for="nu-dni">DNI (con esto entra a la app)</label><input id="nu-dni" class="input" inputmode="numeric" required></div>
       <div><label class="label" for="nu-tel">Teléfono</label><input id="nu-tel" class="input" inputmode="tel" placeholder="381…"></div>
-      ${rol === 'encargado' ? '<div><label class="label" for="nu-circ">Circuito a cargo</label><input id="nu-circ" class="input" inputmode="numeric" required placeholder="Ej: 19"></div>' : ''}
+      ${rol === 'encargado' ? '<div><label class="label" for="nu-circ">Circuitos a cargo</label><input id="nu-circ" class="input" inputmode="text" autocomplete="off" required placeholder="Ej: 19 · si son varios: 19, 20, 21"><div class="muted small">Si maneja más de un circuito, separalos con coma.</div></div>' : ''}
       <div><label class="label" for="nu-pass">Contraseña inicial</label><input id="nu-pass" class="input num" value="${clave}" minlength="6" required></div>
       <div class="error" id="nu-err" role="alert"></div>
       <button class="btn btn-full" type="submit">Crear y compartir acceso</button>
@@ -840,7 +849,7 @@ async function crearUsuario(form) {
   const dni = normDni($('#nu-dni').value);
   const tel = normDni($('#nu-tel').value);
   const pass = $('#nu-pass').value.trim();
-  const circuito = normDni($('#nu-circ')?.value || '') || '';
+  const circuito = circuitosDe($('#nu-circ')?.value || '').join(', ');
   const err = $('#nu-err');
   if (!dniValido(dni)) { err.textContent = 'El DNI tiene que tener 7 u 8 números.'; return; }
   const ya = st.usuarios.find((u) => u.dni === dni);
@@ -855,7 +864,7 @@ async function crearUsuario(form) {
   try {
     const r = await S.crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre });
     const link = location.origin + location.pathname;
-    const msg = `Hola ${primerNombre(nombre)}! Ya tenés acceso a ${APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? ' del circuito ' + circuito : ''}.\nEntrá en ${link}\nDNI: ${dni}\nContraseña: ${r?.reactivado ? 'la misma que usabas antes' : pass}`;
+    const msg = `Hola ${primerNombre(nombre)}! Ya tenés acceso a ${APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? (circuitosDe(circuito).length > 1 ? ' de los ' : ' del ') + textoCircuitos(circuito).toLowerCase() : ''}.\nEntrá en ${link}\nDNI: ${dni}\nContraseña: ${r?.reactivado ? 'la misma que usabas antes' : pass}`;
     const wa = waUrl(tel, msg);
     hojaHtml(`
       <div class="aviso ok">${ic('ok', 18)}<span>${esc(nombre)} ya puede entrar${padre ? ' · quedó en el equipo de ' + esc(padre.nombre) : ''}.</span></div>
@@ -891,7 +900,7 @@ function vistaPanel() {
         ${subir('fis', 'Elegir planilla de fiscales')}`)}
       ${puedePadron() ? herr('padron', 'padron', 'Padrón oficial', 'Solo cabezas' + (S.padronCantidad?.() != null ? ` · ${S.padronCantidad().toLocaleString('es-AR')} electores` : ''), `
         <div class="muted">Subí el padrón que recibe el partido (Excel o CSV). Con esto, al escribir un DNI se completan nombre, escuela, mesa y orden.</div>
-        <div><label class="label" for="pad-circ">Circuito (si el archivo no trae esa columna)</label><input id="pad-circ" class="input" inputmode="numeric" value="${esc(st.me.circuito || '')}" placeholder="Ej: 19"></div>
+        <div><label class="label" for="pad-circ">Circuito (si el archivo no trae esa columna)</label><input id="pad-circ" class="input" inputmode="numeric" value="${esc(unCircuito(st.me))}" placeholder="Ej: 19"></div>
         <label class="archivo" for="pad-file">${ic('subir', 22)}<div><b>Elegir padrón</b></div><input id="pad-file" type="file" accept=".xlsx,.xls,.csv,.ods,.docx"></label>
         <div id="pad-res" class="stack"></div>`) : ''}
       ${st.me.rol === 'cabeza' ? herr('listas', 'fiscal', 'Listas del escrutinio', 'Las que cargan los fiscales del acta', `
@@ -940,7 +949,7 @@ function pintarTablero() {
     ${bloqueCircuitos(porCirc)}
     ${ranking.length ? `<div class="card"><div class="escuela-h"><h3 class="grow">${ROL_CORTO[rolRanking]}s</h3><span class="muted small">votaron / cargados</span></div>
       ${ranking.map(({ u, n, v }) => `<div class="miembro"><div class="ini rol-${u.rol}">${esc(iniciales(u.nombre))}</div>
-        <div class="grow"><div style="font-weight:600">${esc(u.nombre)}</div><div class="muted small">${u.circuito ? 'Circuito ' + esc(u.circuito) : ''}</div></div>
+        <div class="grow"><div style="font-weight:600">${esc(u.nombre)}</div><div class="muted small">${esc(textoCircuitos(u))}</div></div>
         <span class="num" style="font-weight:700">${fmtN(v)}/${fmtN(n)}</span><span class="pill ${pct(v, n) >= 60 ? 'p-ok' : 'p-warn'}">${pct(v, n)}%</span></div>`).join('')}
     </div>` : ''}`;
 }
@@ -950,7 +959,7 @@ function bloqueCircuitos(porCirc) {
   const cab = st.me.rol === 'cabeza';
   const claves = new Set(Object.keys(porCirc));
   if (cab) Object.keys(res).forEach((k) => claves.add(k));
-  else if (st.me.circuito) claves.add(st.me.circuito);
+  else circuitosDe(st.me).forEach((k) => claves.add(k));
   const lista = [...claves].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
   if (!lista.length) return '';
   st.circAbiertos ||= new Set();
@@ -1370,7 +1379,7 @@ async function enviarActa() {
 
 function guardarMesaFiscal(mesa, escuela) {
   const f = miFiscalia();
-  fx({ mesa: String(mesa || ''), escuela: escuela || '', circuito: f.circuito || st.me.circuito || '' }).then(() => { st.fx.editMesa = false; toast(`Mesa ${mesa} guardada`); pintarFiscal(); });
+  fx({ mesa: String(mesa || ''), escuela: escuela || '', circuito: f.circuito || unCircuito(st.me) || '' }).then(() => { st.fx.editMesa = false; toast(`Mesa ${mesa} guardada`); pintarFiscal(); });
 }
 
 function resumenActaHtml(acta, listas) {
@@ -1514,7 +1523,7 @@ function hojaCuenta() {
   const me = st.me;
   abrirHoja(`
     <div class="row"><div class="ini rol-${me.rol}" style="width:48px;height:48px;border-radius:24px;font-size:15px">${esc(iniciales(me.nombre))}</div>
-      <div class="grow"><h2>${esc(me.nombre)}</h2><div class="muted">${ROL_LABEL[me.rol]}${me.circuito ? ' · Circuito ' + esc(me.circuito) : ''}</div></div>
+      <div class="grow"><h2>${esc(me.nombre)}</h2><div class="muted">${ROL_LABEL[me.rol]}${me.circuito ? ' · ' + esc(textoCircuitos(me)) : ''}</div></div>
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
     <div class="card pad small stack"><div>Campaña: <b>${esc(me.campania)}</b></div><div class="num">DNI: <b>${fmtDni(me.dni)}</b></div></div>
     <button class="btn btn-sec btn-full" data-act="mi-clave">${ic('llave', 18)} Cambiar mi contraseña</button>
@@ -1632,6 +1641,23 @@ const acciones = {
   'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol, el.dataset.padre || null),
   'eq-toggle': (el) => { const id = el.dataset.uid; if (st.abiertos.has(id)) st.abiertos.delete(id); else st.abiertos.add(id); pintarEquipo(); },
   'eq-opciones': (el) => hojaQuitarUsuario(el.dataset.uid),
+  'eq-circ': async (el) => {
+    const u = usuarioPorId(el.dataset.uid);
+    const nuevo = circuitosDe($('#qu-circ').value).join(', ');
+    if (!nuevo && u.rol === 'encargado') { $('#qu-circ-err').textContent = 'Escribí al menos un circuito.'; return; }
+    const viejo = circuitosDe(u).join(', ');
+    if (nuevo === viejo) { toast('No hubo cambios'); return; }
+    el.disabled = true; el.textContent = 'Guardando…';
+    try {
+      await S.actualizarUsuario(u.uid, { circuito: nuevo });
+      // Los de su equipo que tenían sus mismos circuitos se actualizan también
+      for (const x of st.usuarios.filter((x) => x.uid !== u.uid && x.path.includes(u.uid) && x.rol !== 'fiscal' && circuitosDe(x).join(', ') === viejo)) {
+        try { await S.actualizarUsuario(x.uid, { circuito: nuevo }); } catch { /* sigue */ }
+      }
+      toast(`${primerNombre(u.nombre)}: ${textoCircuitos(nuevo) || 'sin circuito'}`);
+      hojaQuitarUsuario(u.uid);
+    } catch (e) { $('#qu-circ-err').textContent = mensajeError(e); el.disabled = false; el.textContent = 'Guardar circuitos'; }
+  },
   'eq-quitar': async (el) => {
     const u = usuarioPorId(el.dataset.uid);
     const sel = $('#qu-destino')?.value;

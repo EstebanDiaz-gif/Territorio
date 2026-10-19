@@ -103,6 +103,11 @@ export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padr
   return { uid, reactivado };
 }
 
+// Cambiar datos de alguien del equipo (por ahora, sus circuitos)
+export async function actualizarUsuario(uid, cambios) {
+  return sinTrabar(updateDoc(D('usuarios', uid), cambios));
+}
+
 // ----- contraseñas
 export async function cambiarClave(actual, nueva) {
   const u = auth.currentUser;

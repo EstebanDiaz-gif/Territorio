@@ -38,6 +38,18 @@ export const TIPOS = [
 export const TIPO_LABEL = Object.fromEntries(TIPOS);
 
 export const normDni = (s) => String(s ?? '').replace(/\D/g, '');
+// Circuitos a cargo: un encargado puede tener varios ("19, 20"). Se guardan como texto separado por comas.
+export function circuitosDe(x) {
+  const s = typeof x === 'string' ? x : (x?.circuito || '');
+  return [...new Set(String(s).split(/\s*(?:,|;|\/|\s+y\s+|\s)\s*/i).map((c) => normDni(c) || c.trim().toUpperCase()).filter(Boolean))];
+}
+export const unCircuito = (x) => { const cs = circuitosDe(x); return cs.length === 1 ? cs[0] : ''; };
+export function textoCircuitos(x, corto = false) {
+  const cs = circuitosDe(x);
+  if (!cs.length) return '';
+  const lista = cs.length === 1 ? cs[0] : cs.slice(0, -1).join(', ') + ' y ' + cs[cs.length - 1];
+  return (corto ? (cs.length > 1 ? 'Circs. ' : 'Circ. ') : (cs.length > 1 ? 'Circuitos ' : 'Circuito ')) + lista;
+}
 export const dniValido = (d) => /^\d{7,8}$/.test(d);
 export const fmtDni = (d) => String(d || '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 export const bucketDe = (dni) => dni.slice(-3).padStart(3, '0');

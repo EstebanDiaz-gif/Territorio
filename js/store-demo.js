@@ -65,6 +65,12 @@ export function watchUsuarios(cb) {
   return () => subs.delete(f);
 }
 
+export async function actualizarUsuario(uid, cambios) {
+  const u = db.usuarios[uid];
+  if (!u || !(me.rol === 'cabeza' || (u.path.includes(me.uid) && uid !== me.uid))) throw err('permission-denied', 'No podés cambiar a esa persona');
+  Object.assign(u, cambios); guardar();
+  return { ok: true };
+}
 export async function cambiarClave(actual, nueva) {
   await espera();
   if (db.claves[me.uid] !== actual) throw err('auth/invalid-credential', 'La contraseña actual no es correcta');
