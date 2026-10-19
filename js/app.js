@@ -964,7 +964,7 @@ function bloqueCircuitos(porCirc) {
     let html = `<button type="button" class="circ-btn" data-act="circ-toggle" data-c="${esc(k)}" aria-expanded="${abierto}">
       <span class="row" style="justify-content:space-between;gap:8px">
         <span><span class="chev" aria-hidden="true">${abierto ? '▾' : '▸'}</span> <b>Circuito ${esc(k)}</b></span>
-        <span class="num small"><b>${pct(v, n)}%</b> <span class="muted">· ${fmt(v)} de ${fmt(n)} votaron</span></span>
+        <span class="num small"><b>${n == null ? '…' : pct(v, n) + '%'}</b> <span class="muted">· ${fmt(v)} de ${fmt(n)} votaron</span></span>
       </span>
       ${barra(v, n)}
       <span class="muted small" style="display:block">${fmt(n)} cargados${e ? ` de ${fmt(e)} electores en el padrón` : ''}</span>
@@ -982,7 +982,7 @@ function bloqueCircuitos(porCirc) {
     html += `<div class="circ-esc">${nombres.map((nm) => {
       const x = escs[nm];
       return `<div><div class="row small" style="justify-content:space-between;gap:8px"><span style="font-weight:600">${esc(nm)}</span>
-        <span class="num"><b>${pct(x.v, x.n)}%</b> <span class="muted">· ${fmt(x.v)}/${fmt(x.n)}</span></span></div>
+        <span class="num"><b>${x.n == null ? '…' : pct(x.v, x.n) + '%'}</b> <span class="muted">· ${fmt(x.v)}/${fmt(x.n)}</span></span></div>
         ${barra(x.v, x.n)}${x.e ? `<div class="muted small">${fmt(x.e)} electores</div>` : ''}</div>`;
     }).join('')}</div>`;
     return html;
