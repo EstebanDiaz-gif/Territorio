@@ -890,6 +890,18 @@ async function crearUsuario(form) {
   try {
     const r = await S.crearUsuario({ dni, nombre, tel, rol, pass, circuito, padre, domicilio });
     const link = location.origin + location.pathname;
+    if (r?.invitado) {
+      const msgI = `Hola ${primerNombre(nombre)}! Te sumamos a ${st.me.campania || APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? (circuitosDe(circuito).length > 1 ? ' de los ' : ' del ') + textoCircuitos(circuito).toLowerCase() : ''}.\nEntrá en ${link} con tu DNI (${dni}) y la misma contraseña que ya usabas en ${APP_NAME}. Al entrar quedás en el equipo.`;
+      const waI = waUrl(tel, msgI);
+      hojaHtml(`
+        <div class="aviso warn">${ic('alerta', 18)}<span><b>${esc(nombre)} ya tenía usuario de ${APP_NAME}</b> (de otra campaña). Quedó invitado: aparece en tu equipo cuando entre con su DNI y su contraseña de siempre.</span></div>
+        <div class="muted small">Si sigue activo en otra campaña, primero lo tienen que quitar de allá.</div>
+        <div class="card pad stack"><div class="muted small">Mandale este mensaje:</div><div style="white-space:pre-line">${esc(msgI)}</div></div>
+        ${waI ? `<a class="btn btn-full" href="${waI}" target="_blank" rel="noopener">${ic('wa')} Enviar por WhatsApp</a>` : ''}
+        <button class="btn btn-sec" data-act="copiar" data-txt="${esc(msgI)}">Copiar mensaje</button>
+        <button class="btn btn-ghost" data-act="cerrar">Listo</button>`);
+      return;
+    }
     const msg = `Hola ${primerNombre(nombre)}! Ya tenés acceso a ${APP_NAME} como ${ROL_CORTO[rol].toLowerCase()}${circuito ? (circuitosDe(circuito).length > 1 ? ' de los ' : ' del ') + textoCircuitos(circuito).toLowerCase() : ''}.\nEntrá en ${link}\nDNI: ${dni}\nContraseña: ${r?.reactivado ? 'la misma que usabas antes' : pass}`;
     const wa = waUrl(tel, msg);
     hojaHtml(`

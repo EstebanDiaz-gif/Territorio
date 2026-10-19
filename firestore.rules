@@ -14,6 +14,23 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
+    // Invitación para alguien que ya tiene cuenta (de otra campaña). Se acepta al entrar con su DNI.
+    match /invitaciones/{dni} {
+      function gestorDe(c) {
+        return exists(/databases/$(database)/documents/campanias/$(c)/usuarios/$(request.auth.uid))
+          && get(/databases/$(database)/documents/campanias/$(c)/usuarios/$(request.auth.uid)).data.rol != 'fiscal';
+      }
+      function soyYo() { return request.auth != null && request.auth.token.email == dni + '@usuarios.territorio.app'; }
+      allow read: if soyYo() || (request.auth != null && gestorDe(resource.data.cid));
+      allow create, update: if request.auth != null
+        && request.resource.data.dni == dni
+        && request.resource.data.por == request.auth.uid
+        && gestorDe(request.resource.data.cid)
+        && (request.resource.data.rol != 'cabeza'
+          || get(/databases/$(database)/documents/campanias/$(request.resource.data.cid)/usuarios/$(request.auth.uid)).data.rol == 'cabeza');
+      allow delete: if soyYo() || (request.auth != null && gestorDe(resource.data.cid));
+    }
+
     match /campanias/{cid} {
       function ruta(sub) { return path('/databases/' + database + '/documents/campanias/' + cid + sub); }
       function miembro() { return request.auth != null && exists(ruta('/usuarios/' + request.auth.uid)); }
@@ -50,6 +67,14 @@ service cloud.firestore {
             && nivel(request.resource.data.rol) == nivel(usuario(request.resource.data.parentId).rol) + 1
             && request.resource.data.path == usuario(request.resource.data.parentId).path.concat([uid])
             && (esCabeza() || enMiEquipo(usuario(request.resource.data.parentId).path)))
+          // alguien que ya tenía cuenta y aceptó la invitación a esta campaña (se agrega a sí mismo)
+          || (uid == request.auth.uid
+            && request.auth.token.email == request.resource.data.dni + '@usuarios.territorio.app'
+            && exists(/databases/$(database)/documents/invitaciones/$(request.resource.data.dni))
+            && get(/databases/$(database)/documents/invitaciones/$(request.resource.data.dni)).data.cid == cid
+            && request.resource.data.rol == get(/databases/$(database)/documents/invitaciones/$(request.resource.data.dni)).data.rol
+            && request.resource.data.parentId == get(/databases/$(database)/documents/invitaciones/$(request.resource.data.dni)).data.parentId
+            && request.resource.data.path == get(/databases/$(database)/documents/invitaciones/$(request.resource.data.dni)).data.path.concat([uid]))
           // un fiscal, colgado de quien lo cargó
           || (gestor()
             && request.resource.data.rol == 'fiscal'

@@ -28,12 +28,37 @@ const C = (nombre) => collection(db, 'campanias', cid, nombre);
 // Las escrituras quedan en cola si no hay señal; no esperamos al servidor más de unos segundos
 const sinTrabar = (p, ms = 4000) => Promise.race([p.then(() => ({ ok: true })), new Promise((r) => setTimeout(() => r({ ok: true, pendiente: true }), ms))]);
 
+// Alguien que ya tenía cuenta (de otra campaña) y lo sumaron a una nueva: al entrar, acepta la invitación
+async function aceptarInvitacion(uid, dni) {
+  let inv;
+  try { inv = await getDoc(doc(db, 'invitaciones', dni)); } catch { return false; }
+  if (!inv.exists()) return false;
+  const v = inv.data();
+  cid = v.cid;
+  await setDoc(D('usuarios', uid), {
+    uid, dni, nombre: v.nombre || '', tel: v.tel || '', rol: v.rol, domicilio: v.domicilio || '', circuito: v.circuito || '',
+    parentId: v.parentId || null, path: [...(v.path || []), uid], creado: serverTimestamp()
+  });
+  await setDoc(doc(db, 'cuentas', uid), { cid });
+  await deleteDoc(doc(db, 'invitaciones', dni)).catch(() => {});
+  return true;
+}
+
 async function cargarMe(uid) {
+  const dni = String(auth.currentUser?.email || '').split('@')[0];
   const cuenta = await getDoc(doc(db, 'cuentas', uid));
-  if (!cuenta.exists()) throw Object.assign(new Error('Este usuario no pertenece a ninguna campaña'), { code: 'sin-campania' });
-  cid = cuenta.data().cid;
+  let activo = false;
+  if (cuenta.exists()) {
+    cid = cuenta.data().cid;
+    activo = (await getDoc(D('usuarios', uid))).exists();
+  }
+  if (activo) {
+    // si quedó una invitación vieja a esta misma campaña, se descarta
+    try { const inv = await getDoc(doc(db, 'invitaciones', dni)); if (inv.exists() && inv.data().cid === cid) await deleteDoc(inv.ref); } catch { /* sin invitación */ }
+  } else if (dni) activo = await aceptarInvitacion(uid, dni);
+  if (!activo && !cuenta.exists()) throw Object.assign(new Error('Este usuario no pertenece a ninguna campaña'), { code: 'sin-campania' });
+  if (!activo) throw Object.assign(new Error('Tu usuario fue dado de baja de la campaña. Pedile a quien te suma que te vuelva a agregar.'), { code: 'sin-campania' });
   const u = await getDoc(D('usuarios', uid));
-  if (!u.exists()) throw Object.assign(new Error('Tu usuario fue dado de baja de la campaña'), { code: 'sin-campania' });
   const camp = await getDoc(doc(db, 'campanias', cid));
   me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [] };
   return me;
@@ -87,7 +112,17 @@ export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padr
     // Si lo habían quitado antes de esta campaña, se lo vuelve a sumar con su cuenta de siempre
     if (e.code !== 'auth/email-already-in-use') throw e;
     const baja = await getDoc(D('bajas', dni));
-    if (!baja.exists()) throw e;
+    if (!baja.exists()) {
+      // Ya tiene cuenta de otra campaña: queda invitado y se suma solo cuando entra
+      const esCab = rol === 'cabeza';
+      await setDoc(doc(db, 'invitaciones', dni), {
+        dni, cid, nombre, tel: tel || '', rol, domicilio: domicilio || '',
+        circuito: circuito || sup.circuito || '',
+        parentId: esCab ? null : sup.uid, path: esCab ? [] : sup.path,
+        por: me.uid, at: serverTimestamp()
+      });
+      return { invitado: true };
+    }
     uid = baja.data().uid;
     reactivado = true;
   }
