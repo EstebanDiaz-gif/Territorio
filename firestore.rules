@@ -56,7 +56,7 @@ service cloud.firestore {
       // ---------- Padrón (en baldes por los últimos 3 dígitos del DNI) ----------
       match /padron/{balde} {
         allow read: if miembro();
-        allow write: if miembro() && (yo().rol == 'cabeza' || yo().rol == 'encargado');
+        allow write: if esCabeza();
       }
 
       // ---------- Personas (id = DNI: no puede haber dos con el mismo DNI) ----------

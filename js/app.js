@@ -38,7 +38,7 @@ const waUrl = (tel, texto) => {
 };
 const textoRecordatorio = (p) => `Hola ${primerNombre(p.nombre)}! Te recuerdo dónde votás: ${p.escuela || '(escuela a confirmar)'}${p.dirEscuela ? ' (' + p.dirEscuela + ')' : ''}${p.mesa ? ', mesa ' + p.mesa : ''}${p.orden ? ', número de orden ' + p.orden : ''}.`;
 const esMov = () => st.me.rol === 'movilizador';
-const puedePadron = () => ['cabeza', 'encargado'].includes(st.me.rol);
+const puedePadron = () => st.me.rol === 'cabeza';
 const usuarioPorId = (uid) => st.usuarios.find((u) => u.uid === uid);
 const miEquipo = () => st.usuarios.filter((u) => u.uid !== st.me.uid && (st.me.rol === 'cabeza' || u.path.includes(st.me.uid)));
 const pausa = (t) => new Promise((r) => setTimeout(r, t));
@@ -648,14 +648,14 @@ function vistaPanel() {
   return `
     <div id="tablero" class="stack"></div>
     <div id="conflictos"></div>
-    <div class="sec-title"><h2>Importar planilla de gente</h2></div>
+    <div class="sec-title"><h2>Lista de gente de tu equipo</h2></div>
     <div class="card pad stack">
       <div class="muted">Excel, CSV o Word con una tabla. Detecta las columnas solo, limpia los DNI y completa escuela y mesa con el padrón. Los DNI que ya son de otro no se importan.</div>
       <label class="archivo" for="imp-file">${ic('subir', 22)}<div><b>Elegir archivo</b></div><input id="imp-file" type="file" accept=".xlsx,.xls,.csv,.docx,.ods"></label>
       <div id="imp-res" class="stack"></div>
     </div>
     ${puedePadron() ? `
-    <div class="sec-title"><h2>Padrón</h2>${S.padronCantidad?.() != null ? `<span class="muted num">${S.padronCantidad().toLocaleString('es-AR')} cargados</span>` : ''}</div>
+    <div class="sec-title"><h2>Padrón oficial · solo cabezas</h2>${S.padronCantidad?.() != null ? `<span class="muted num">${S.padronCantidad().toLocaleString('es-AR')} cargados</span>` : ''}</div>
     <div class="card pad stack">
       <div class="muted">Subí el padrón que recibe el partido (Excel o CSV). Con esto, al escribir un DNI se completan nombre, escuela, mesa y orden.</div>
       <div><label class="label" for="pad-circ">Circuito (si el archivo no trae esa columna)</label><input id="pad-circ" class="input" inputmode="numeric" value="${esc(st.me.circuito || '')}" placeholder="Ej: 19"></div>
@@ -739,7 +739,7 @@ async function analizarImportacion(file) {
     const pareceePadron = m.columnas.includes('mesa') && m.columnas.includes('orden') && m.validas.length > 500;
     if (pareceePadron || m.validas.length > 3000) {
       $('#imp-file').value = '';
-      res.innerHTML = `<div class="aviso warn">${ic('alerta', 18)}<span>Este archivo tiene ${m.validas.length.toLocaleString('es-AR')} personas${pareceePadron ? ' con mesa y número de orden: parece un padrón' : ''}. ${puedePadron() ? 'Subilo más abajo, en la sección <b>Padrón</b>.' : 'El padrón lo sube una cabeza o un encargado de circuito.'} Acá van solo las listas de gente de cada equipo (hasta 3.000 por archivo).</span></div>`;
+      res.innerHTML = `<div class="aviso warn">${ic('alerta', 18)}<span>Este archivo tiene ${m.validas.length.toLocaleString('es-AR')} personas${pareceePadron ? ' con mesa y número de orden: parece un padrón' : ''}. ${puedePadron() ? 'Subilo más abajo, en la sección <b>Padrón oficial</b>.' : 'El padrón lo sube una cabeza.'} Acá van solo las listas de gente de cada equipo (hasta 3.000 por archivo).</span></div>`;
       return;
     }
     res.innerHTML = `<div class="muted">Revisando ${m.validas.length} personas contra el padrón y la base…</div><div class="progreso"><i id="imp-prog"></i></div>`;

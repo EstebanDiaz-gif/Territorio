@@ -35,7 +35,7 @@ Cada vez que publiques cambios, subí el número de `VERSION` en `sw.js` para qu
 
 ## Padrón
 
-El padrón lo recibe el partido o la alianza. Se sube desde **Panel → Padrón** (cabezas y encargados) en Excel o CSV.
+El padrón lo recibe el partido o la alianza. Se sube desde **Panel → Padrón oficial** (solo cabezas) en Excel o CSV.
 Detecta solas las columnas DNI, nombre, domicilio, circuito, escuela, dirección de la escuela, mesa y orden.
 Se guarda en 1000 documentos (por los últimos 3 dígitos del DNI): buscar un DNI cuesta 1 lectura y subir
 un padrón entero cuesta como mucho 1000 escrituras, así que entra en el plan gratis.
