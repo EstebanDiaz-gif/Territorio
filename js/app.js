@@ -1,7 +1,7 @@
 import { APP_NAME, FIREBASE_CONFIG, ZONA } from './config.js';
 import {
   ROLES, ROL_LABEL, ROL_CORTO, nivel, rolAbajo, ESTADOS, ESTADO_LABEL, TIPOS, TIPO_LABEL,
-  normDni, dniValido, fmtDni, telWhatsApp
+  normDni, dniValido, fmtDni, telWhatsApp, idLista
 } from './roles.js';
 import { leerArchivo, mapearPersonas, mapearPadron, exportarExcel, NOMBRE_COLUMNA } from './importers.js';
 
@@ -40,7 +40,7 @@ const textoRecordatorio = (p) => `Hola ${primerNombre(p.nombre)}! Te recuerdo d�
 const esMov = () => st.me.rol === 'movilizador';
 const puedePadron = () => st.me.rol === 'cabeza';
 const usuarioPorId = (uid) => st.usuarios.find((u) => u.uid === uid);
-const miEquipo = () => st.usuarios.filter((u) => u.uid !== st.me.uid && (st.me.rol === 'cabeza' || u.path.includes(st.me.uid)));
+const miEquipo = () => st.usuarios.filter((u) => u.uid !== st.me.uid && u.rol !== 'fiscal' && (st.me.rol === 'cabeza' || u.path.includes(st.me.uid)));
 const pausa = (t) => new Promise((r) => setTimeout(r, t));
 
 function mensajeError(e) {
@@ -71,6 +71,7 @@ const I = {
   subir: '<path d="M12 15V3M7 8l5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
   bajar: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
   auto: '<path d="M3 16v-5l2-5h11l3 5h2v5h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/>',
+  camara: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="4"/>',
   fiscal: '<path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
   padron: '<path d="M5 3h11l3 3v15H5z"/><path d="M9 9h6M9 13h6M9 17h4"/>',
   mas3: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
@@ -117,11 +118,15 @@ function iniciarSesion(me) {
   st.c = { fase: 'inicio' };
   st.resumen = undefined; st.circAbiertos = null; st.abiertos = null;
   st.unsubs.forEach((u) => u());
-  st.unsubs = [
-    S.watchUsuarios((x) => { st.usuarios = x; refrescar(); }),
-    S.watchPersonas((x) => { st.personas = x; refrescar(); }),
-    S.watchConflictos((x) => { st.conflictos = x; refrescar(); })
-  ];
+  st.fiscalias = []; st.fx = { votos: {} };
+  st.unsubs = me.rol === 'fiscal'
+    ? [S.watchFiscalias((x) => { st.fiscalias = x; refrescar(); })]
+    : [
+      S.watchUsuarios((x) => { st.usuarios = x; refrescar(); }),
+      S.watchPersonas((x) => { st.personas = x; refrescar(); }),
+      S.watchConflictos((x) => { st.conflictos = x; refrescar(); }),
+      S.watchFiscalias((x) => { st.fiscalias = x; refrescar(); })
+    ];
   pintar();
 }
 
@@ -140,8 +145,8 @@ function pintarLogin() {
     <div class="card pad stack">
       <div><h2>Probá la app</h2><div class="muted">Modo demostración con datos inventados. Elegí con qué rol entrar:</div></div>
       <div class="demo-roles">
-        ${[['cab1', 'cabeza'], ['enc1', 'encargado'], ['dir1', 'dirigente'], ['mov1', 'movilizador']].map(([uid, rol]) => `
-          <button type="button" data-act="demo-entrar" data-uid="${uid}"><b>${ROL_CORTO[rol]}</b><span class="muted small">${esc({ cab1: 'Ricardo Benítez', enc1: 'Laura Molina · circ. 19', dir1: 'Daniel Torres', mov1: 'Marcos Ríos' }[uid])}</span></button>`).join('')}
+        ${[['cab1', 'cabeza'], ['enc1', 'encargado'], ['dir1', 'dirigente'], ['mov1', 'movilizador'], ['fis1', 'fiscal']].map(([uid, rol]) => `
+          <button type="button" data-act="demo-entrar" data-uid="${uid}"><b>${ROL_CORTO[rol]}</b><span class="muted small">${esc({ cab1: 'Ricardo Benítez', enc1: 'Laura Molina · circ. 19', dir1: 'Daniel Torres', mov1: 'Marcos Ríos', fis1: 'Nadia Yasmín · solo su mesa' }[uid])}</span></button>`).join('')}
       </div>
     </div>` : '';
   if (st.login === 'crear') {
@@ -186,6 +191,7 @@ function tabsDisponibles() {
 }
 
 function pintar() {
+  if (st.me.rol === 'fiscal') { pintarFiscal(); return; }
   const app = $('#app');
   app.innerHTML = `
     ${DEMO ? '<div class="demo-band">Modo demostración · los datos son inventados</div>' : ''}
@@ -249,6 +255,7 @@ function pintarTop() {
 
 function refrescar() {
   if (!st.me || !$('#main')) return;
+  if (st.me.rol === 'fiscal') { refrescarFiscal(); return; }
   pintarTop();
   pintarNav();
   refrescarPartes();
@@ -257,7 +264,7 @@ function refrescarPartes() {
   if (st.tab === 'gente') pintarLista();
   if (st.tab === 'dia') pintarDia();
   if (st.tab === 'equipo') pintarEquipo();
-  if (st.tab === 'panel') { cargarResumen(); pintarTablero(); pintarConflictos(); }
+  if (st.tab === 'panel') { cargarResumen(); pintarTablero(); pintarFiscalizacion(); pintarConflictos(); }
 }
 
 // ---------------------------------------------------------------- GENTE
@@ -358,6 +365,9 @@ function hojaPersona(dni, confirmarBorrado = false) {
     <div><label class="label" for="p-nota">Nota</label><textarea id="p-nota" class="input" rows="2" placeholder="Ej: lo busca Diego a las 10">${esc(p.revisar ? '' : p.nota)}</textarea></div>
     <button type="button" class="btn btn-full ${p.voto ? 'btn-ok' : ''}" data-act="p-voto">${p.voto ? ic('ok') + ' Ya votó · tocar para deshacer' : 'Marcar que ya votó'}</button>
     <div class="muted">Es de <b>${esc(p.ownerNombre)}</b>${p.ownerId === st.me.uid ? ' (vos)' : ''}</div>
+    ${p.tipo && p.tipo !== 'votante' ? (st.usuarios.some((u) => u.dni === p.dni)
+      ? `<div class="aviso ok">${ic('ok', 18)}<span>Ya tiene acceso a la app como fiscal.</span></div>`
+      : `<button type="button" class="btn btn-sec" data-act="fiscal-acceso" data-dni="${p.dni}">${ic('fiscal', 18)} Darle acceso a la app como fiscal</button>`) : ''}
     ${destinos.length ? `<div><label class="label" for="p-trans">Pasar a otra persona de tu equipo</label>
       <div class="row"><select id="p-trans" class="input grow">${destinos.map((u) => `<option value="${u.uid}">${esc(u.nombre)} · ${ROL_CORTO[u.rol]}</option>`).join('')}</select>
       <button type="button" class="btn btn-sec" data-act="p-transferir">Pasar</button></div></div>` : ''}
@@ -582,7 +592,7 @@ function pintarEquipo() {
   const el = $('#equipo');
   if (!el) return;
   const cont = conteoPorUsuario();
-  const visibles = st.me.rol === 'cabeza' ? st.usuarios : st.usuarios.filter((u) => u.path.includes(st.me.uid));
+  const visibles = (st.me.rol === 'cabeza' ? st.usuarios : st.usuarios.filter((u) => u.path.includes(st.me.uid))).filter((u) => u.rol !== 'fiscal');
   const ids = new Set(visibles.map((u) => u.uid));
   const hijos = {};
   for (const u of visibles) {
@@ -601,7 +611,7 @@ function pintarEquipo() {
     const subs = hijos[u.uid] || [];
     const abierto = st.abiertos.has(u.uid);
     const wa = waUrl(u.tel);
-    const PLURAL = { cabeza: 'cabezas', encargado: 'encargados', dirigente: 'dirigentes', movilizador: 'movilizadores' };
+    const PLURAL = { cabeza: 'cabezas', encargado: 'encargados', dirigente: 'dirigentes', movilizador: 'movilizadores', fiscal: 'fiscales' };
     const detalle = subs.length ? `${subs.length} ${subs.length === 1 ? ROL_CORTO[subs[0].rol].toLowerCase() : PLURAL[subs[0].rol]}` : '';
     let html = `<div class="miembro" style="padding-left:${10 + prof * 18}px">
       <button type="button" class="miembro-btn" data-act="eq-toggle" data-uid="${u.uid}" aria-expanded="${abierto}">
@@ -718,6 +728,7 @@ function vistaPanel() {
   const subir = (pre, texto) => `<label class="archivo" for="${pre}-file">${ic('subir', 22)}<div><b>${texto}</b></div><input id="${pre}-file" type="file" accept=".xlsx,.xls,.csv,.docx,.ods"></label><div id="${pre}-res" class="stack"></div>`;
   return `
     <div id="tablero" class="stack"></div>
+    <div id="fiscalizacion" class="stack"></div>
     <div id="conflictos"></div>
     <div class="sec-title"><h2>Herramientas</h2></div>
     <div class="stack" style="gap:8px">
@@ -732,6 +743,10 @@ function vistaPanel() {
         <div><label class="label" for="pad-circ">Circuito (si el archivo no trae esa columna)</label><input id="pad-circ" class="input" inputmode="numeric" value="${esc(st.me.circuito || '')}" placeholder="Ej: 19"></div>
         <label class="archivo" for="pad-file">${ic('subir', 22)}<div><b>Elegir padrón</b></div><input id="pad-file" type="file" accept=".xlsx,.xls,.csv,.ods,.docx"></label>
         <div id="pad-res" class="stack"></div>`) : ''}
+      ${st.me.rol === 'cabeza' ? herr('listas', 'fiscal', 'Listas del escrutinio', 'Las que cargan los fiscales del acta', `
+        <div class="muted">Una lista por renglón, como figuran en el acta (por ejemplo "Lista 501 · Frente …"). Blancos, nulos, recurridos e impugnados ya vienen incluidos. No cambies los nombres una vez que los fiscales empezaron a cargar.</div>
+        <textarea id="listas-txt" class="input" rows="5" placeholder="Lista 501 · Nuestro frente&#10;Lista 502 · …">${esc((st.me.listas || []).map((l) => l.nombre).join('\n'))}</textarea>
+        <button class="btn" data-act="listas-guardar">Guardar listas</button>`) : ''}
       ${herr('excel', 'bajar', 'Descargar Excel', 'Toda la gente de tu equipo', `
         <button class="btn btn-sec" data-act="exportar">${ic('bajar')} Descargar Excel</button>`)}
       ${st.me.rol === 'cabeza' ? herr('borrar', 'alerta', 'Borrar datos', 'Para empezar de nuevo', `
@@ -977,6 +992,319 @@ async function enParalelo(items, n, fn) {
   }));
 }
 
+// ---------------------------------------------------------------- FISCALES
+const INCIDENCIAS_RAPIDAS = ['La mesa abrió tarde', 'Faltan boletas de nuestra lista', 'Problema con las autoridades de mesa', 'Me impiden fiscalizar', 'Problema en el conteo'];
+const miFiscalia = () => st.fiscalias.find((x) => x.id === st.me.uid || x.fiscalUid === st.me.uid) || {};
+const hora = (t) => { const d = new Date(ms(t)); return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }); };
+// Lo que guarda el fiscal lleva siempre su path (las reglas lo exigen)
+const fx = (cambios) => S.actualizarFiscalia(st.me.uid, { ...cambios, path: st.me.path, fiscalUid: st.me.uid, nombre: st.me.nombre, dni: st.me.dni });
+
+function pintarFiscal() {
+  const me = st.me;
+  if (!st.fx.inicio) {
+    st.fx.inicio = true;
+    fx({}).catch(() => {});
+    S.leerListas().then((l) => { me.listas = l; refrescarFiscal(); }).catch(() => {});
+    S.leerResumenPadron().then((r) => { st.resumen = r; refrescarFiscal(); }).catch(() => {});
+  }
+  const f = miFiscalia();
+  const y = window.scrollY;
+  const escuelas = [...new Set([f.votaEscuela, ...Object.values(st.resumen || {}).flatMap((c) => (c.esc || []).map((e) => e.n))].filter(Boolean))].sort();
+  const listas = me.listas || [];
+  const tieneMesa = !!f.mesa && !st.fx.editMesa;
+  const acta = f.acta;
+  const mostrarFormActa = !acta || st.fx.corrigiendo;
+  $('#app').innerHTML = `
+    ${DEMO ? '<div class="demo-band">Modo demostración · los datos son inventados</div>' : ''}
+    <header class="top"><div class="top-row">
+      <div class="top-titulo"><div class="top-sub">Fiscal · ${esc(me.campania || '')}</div><h1>Mi mesa</h1></div>
+      <button type="button" class="avatar" data-act="cuenta" aria-label="Mi cuenta">${esc(iniciales(me.nombre))}</button>
+    </div></header>
+    <main class="fiscal" style="padding-bottom:calc(32px + env(safe-area-inset-bottom, 0px))">
+      ${f.votaEscuela || f.votaMesa ? `<div class="card pad"><div class="muted small">Dónde votás vos</div><b>${esc(f.votaEscuela || '')}</b>${f.votaMesa ? ` · Mesa <b class="num">${esc(f.votaMesa)}</b>` : ''}</div>` : ''}
+
+      <section class="card pad stack paso">
+        <div class="paso-h"><span class="paso-n ${tieneMesa ? 'hecho' : ''}">${tieneMesa ? '✓' : '1'}</span><h2>Mesa que fiscalizás</h2></div>
+        ${tieneMesa ? `
+          <div class="mesa-grande"><span class="muted small">Mesa</span><b class="num">${esc(f.mesa)}</b><span>${esc(f.escuela || '')}</span></div>
+          <button class="btn btn-ghost btn-sm" data-act="fx-cambiar-mesa">Cambiar</button>` : `
+          ${f.votaMesa ? `<button class="btn btn-sec btn-full" data-act="fx-misma">Es la misma mesa donde voto (${esc(f.votaMesa)})</button><div class="muted small" style="text-align:center">o escribila:</div>` : ''}
+          <div class="row"><div style="flex:0 0 120px"><label class="label" for="fx-mesa">N° de mesa</label><input id="fx-mesa" class="input input-dni" inputmode="numeric" value="${esc(f.mesa || '')}" placeholder="1043"></div>
+          <div class="grow"><label class="label" for="fx-escuela">Escuela</label><input id="fx-escuela" class="input" list="fx-escuelas" value="${esc(f.escuela || f.votaEscuela || '')}" placeholder="Nombre de la escuela"><datalist id="fx-escuelas">${escuelas.map((e) => `<option value="${esc(e)}"></option>`).join('')}</datalist></div></div>
+          <div class="error" id="fx-err-mesa" role="alert"></div>
+          <button class="btn btn-full" data-act="fx-guardar-mesa">Guardar mesa</button>`}
+      </section>
+
+      <section class="card pad stack paso">
+        <div class="paso-h"><span class="paso-n ${f.presente ? 'hecho' : ''}">${f.presente ? '✓' : '2'}</span><h2>Llegada</h2></div>
+        ${f.presente ? `<div class="aviso ok">${ic('ok', 18)}<span>Avisaste que estás en la mesa a las ${hora(f.presenteAt)}.</span></div>`
+          : `<button class="btn btn-full btn-grande" data-act="fx-presente" ${f.mesa ? '' : 'disabled'}>Ya estoy sentado en la mesa</button>
+             ${f.mesa ? '' : '<div class="muted small">Primero guardá la mesa que fiscalizás.</div>'}`}
+      </section>
+
+      <section class="card pad stack paso">
+        <div class="paso-h"><span class="paso-n">!</span><h2>Incidencias</h2></div>
+        <div class="chips wrap">${INCIDENCIAS_RAPIDAS.map((t) => `<button type="button" class="chip" data-act="fx-inc-rapida" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+        <label class="label" for="fx-inc" style="margin:0">Contá qué pasó</label>
+        <textarea id="fx-inc" class="input" rows="2" placeholder="Ej: el presidente de mesa no deja ver el conteo"></textarea>
+        <button class="btn btn-sec" data-act="fx-inc-enviar">Enviar incidencia</button>
+        ${(f.incidencias || []).length ? `<div class="stack" style="gap:6px">${[...f.incidencias].reverse().map((i) => `<div class="inc"><span class="muted small num">${hora(i.at)}</span> ${esc(i.texto)}</div>`).join('')}</div>` : ''}
+      </section>
+
+      <section class="card pad stack paso">
+        <div class="paso-h"><span class="paso-n ${acta && !st.fx.corrigiendo ? 'hecho' : ''}">${acta && !st.fx.corrigiendo ? '✓' : '3'}</span><h2>Cierre: el acta</h2></div>
+        ${!mostrarFormActa ? resumenActaHtml(acta, listas) + `<div class="muted small">Enviado a las ${hora(f.actaAt)}${f.tieneFoto ? ' · con foto' : ' · sin foto'}</div><button class="btn btn-ghost btn-sm" data-act="fx-corregir">Corregir</button>` : `
+          <div class="muted">Cuando termine el conteo: sacale una foto al acta y copiá los números.</div>
+          ${fotoActaHtml()}
+          ${listas.length ? `
+            <div class="stack" style="gap:8px">
+              ${listas.map((l) => campoVoto(l.id, l.nombre)).join('')}
+              ${campoVoto('blancos', 'Votos en blanco')}${campoVoto('nulos', 'Votos nulos')}${campoVoto('recurridos', 'Recurridos')}${campoVoto('impugnados', 'Impugnados')}
+              <div class="voto-fila total">${campoVoto('total', 'Total de votantes de la mesa (según el acta)', true)}</div>
+              <div id="fx-suma" class="small"></div>
+            </div>
+            <div class="error" id="fx-err-acta" role="alert"></div>
+            <button class="btn btn-full btn-grande" data-act="fx-enviar-acta">Enviar resultado</button>`
+          : '<div class="aviso warn">' + ic('alerta', 18) + '<span>Todavía no están cargadas las listas. Avisale a tu referente.</span></div>'}`}
+      </section>
+    </main>`;
+  actualizarSumaActa();
+  window.scrollTo(0, y);
+}
+
+function refrescarFiscal() {
+  const a = document.activeElement;
+  if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return; // no pisar lo que está escribiendo
+  if (st.fx.procesando) return;
+  pintarFiscal();
+}
+
+const campoVoto = (id, nombre, solo) => `${solo ? '' : '<div class="voto-fila">'}<label for="v-${id}">${esc(nombre)}</label><input id="v-${id}" class="input num" inputmode="numeric" data-voto="${id}" value="${esc(st.fx.votos[id] ?? '')}" placeholder="0">${solo ? '' : '</div>'}`;
+
+function fotoActaHtml() {
+  const ft = st.fx.foto;
+  if (st.fx.procesando) return '<div class="card pad muted">Revisando la foto…</div>';
+  if (!ft) return `<label class="archivo foto-btn" for="fx-foto">${ic('camara', 28)}<div><b>Sacar foto del acta</b></div>
+      <div class="muted small">Apoyala en una mesa, con buena luz, entera y sin sombra. Sostené el celular quieto.</div>
+      <input id="fx-foto" type="file" accept="image/*" capture="environment"></label>`;
+  return `<div class="stack" style="gap:8px">
+      <img src="${ft.url}" alt="Foto del acta" class="foto-prev">
+      ${ft.problemas.length ? `<div class="aviso warn">${ic('alerta', 18)}<span>${ft.problemas.map(esc).join(' ')} Conviene sacarla de nuevo para que se lea bien.</span></div>`
+        : `<div class="aviso ok">${ic('ok', 18)}<span>La foto se ve nítida.</span></div>`}
+      <button class="btn btn-sec btn-sm" data-act="fx-foto-otra">Sacar otra foto</button>
+    </div>`;
+}
+
+async function tomarFotoActa(file) {
+  st.fx.procesando = true; pintarFiscal();
+  try { st.fx.foto = await procesarFoto(file); }
+  catch { toast('No se pudo leer la foto. Probá de nuevo.'); st.fx.foto = null; }
+  st.fx.procesando = false; pintarFiscal();
+}
+
+// Comprime la foto y mide nitidez (varianza del laplaciano), luz y tamaño
+async function procesarFoto(file) {
+  let img;
+  try { img = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch { img = await new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = mal; i.src = URL.createObjectURL(file); }); }
+  const W0 = img.width; const H0 = img.height;
+  const k = 700 / Math.max(W0, H0);
+  const cw = Math.max(1, Math.round(W0 * Math.min(1, k))); const ch = Math.max(1, Math.round(H0 * Math.min(1, k)));
+  const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+  const cx = c.getContext('2d', { willReadFrequently: true }); cx.drawImage(img, 0, 0, cw, ch);
+  const d = cx.getImageData(0, 0, cw, ch).data;
+  const g = new Float32Array(cw * ch); let suma = 0; let quemados = 0;
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) { g[j] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; suma += g[j]; if (g[j] >= 252) quemados++; }
+  const brillo = suma / g.length;
+  const reflejo = quemados / g.length;
+  let m = 0; let m2 = 0; let n = 0;
+  for (let yy = 1; yy < ch - 1; yy++) for (let xx = 1; xx < cw - 1; xx++) {
+    const i = yy * cw + xx;
+    const L = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - cw] - g[i + cw];
+    m += L; m2 += L * L; n++;
+  }
+  const nitidez = n ? m2 / n - (m / n) ** 2 : 0;
+  const problemas = [];
+  if (nitidez < 45) problemas.push('Salió movida o desenfocada.');
+  else if (nitidez < 90) problemas.push('Puede estar un poco borrosa.');
+  if (brillo < 70) problemas.push('Está oscura.');
+  else if (reflejo > 0.35) problemas.push('Tiene un reflejo fuerte (flash o luz directa): movela un poco.');
+  if (Math.min(W0, H0) < 900) problemas.push('La imagen es muy chica: acercate o usá la cámara principal.');
+  // Exportar: lado mayor 1600 px y menos de ~650 KB
+  let esc_ = Math.min(1, 1600 / Math.max(W0, H0)); let q = 0.8; let url = '';
+  for (let intento = 0; intento < 8; intento++) {
+    const o = document.createElement('canvas'); o.width = Math.round(W0 * esc_); o.height = Math.round(H0 * esc_);
+    o.getContext('2d').drawImage(img, 0, 0, o.width, o.height);
+    url = o.toDataURL('image/jpeg', q);
+    if (url.length < 880000) break;
+    if (q > 0.55) q -= 0.1; else esc_ *= 0.8;
+  }
+  return { url, nitidez: Math.round(nitidez), brillo: Math.round(brillo), problemas };
+}
+
+function leerVotos() {
+  const v = st.fx.votos; const num = (k) => { const x = String(v[k] ?? '').trim(); return x === '' ? null : parseInt(normDni(x) || '0', 10); };
+  const listas = st.me.listas || [];
+  const votos = Object.fromEntries(listas.map((l) => [l.id, num(l.id)]));
+  return { votos, blancos: num('blancos'), nulos: num('nulos'), recurridos: num('recurridos'), impugnados: num('impugnados'), total: num('total') };
+}
+function actualizarSumaActa() {
+  const el = $('#fx-suma'); if (!el) return;
+  const a = leerVotos();
+  const suma = Object.values(a.votos).reduce((x, y) => x + (y || 0), 0) + (a.blancos || 0) + (a.nulos || 0) + (a.recurridos || 0) + (a.impugnados || 0);
+  if (a.total == null) { el.innerHTML = `<span class="muted">Suma: <b class="num">${suma}</b></span>`; return; }
+  el.innerHTML = suma === a.total ? `<span style="color:var(--ok);font-weight:700">✓ La suma da ${suma}, igual al total.</span>`
+    : `<span style="color:var(--bad);font-weight:700">La suma da ${suma} y el total dice ${a.total}. Revisá los números.</span>`;
+}
+async function enviarActa() {
+  const a = leerVotos(); const err = $('#fx-err-acta');
+  if (Object.values(a.votos).some((x) => x == null) || a.total == null) { err.textContent = 'Completá todas las listas y el total (si una lista no tuvo votos, poné 0).'; return; }
+  ['blancos', 'nulos', 'recurridos', 'impugnados'].forEach((k) => { if (a[k] == null) a[k] = 0; });
+  const suma = Object.values(a.votos).reduce((x, y) => x + y, 0) + a.blancos + a.nulos + a.recurridos + a.impugnados;
+  if (suma !== a.total && !st.fx.confirmaDiferencia) { err.textContent = `La suma (${suma}) no coincide con el total (${a.total}). Revisá; si el acta dice así, tocá Enviar otra vez.`; st.fx.confirmaDiferencia = true; return; }
+  if (!st.fx.foto && !miFiscalia().tieneFoto && !st.fx.confirmaSinFoto) { err.textContent = 'Falta la foto del acta. Sacala arriba; si no podés, tocá Enviar otra vez.'; st.fx.confirmaSinFoto = true; return; }
+  const btn = $('[data-act="fx-enviar-acta"]'); btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    if (st.fx.foto) await S.guardarActa(st.me.uid, st.fx.foto.url, st.me.path);
+    await fx({ acta: { ...a, sumaOk: suma === a.total }, actaAt: Date.now(), tieneFoto: !!(st.fx.foto || miFiscalia().tieneFoto), mesa: miFiscalia().mesa || '', escuela: miFiscalia().escuela || '' });
+    st.fx = { ...st.fx, foto: null, corrigiendo: false, confirmaDiferencia: false, confirmaSinFoto: false };
+    toast('Resultado enviado. ¡Gracias!');
+    pintarFiscal();
+  } catch (e) { err.textContent = mensajeError(e); btn.disabled = false; btn.textContent = 'Enviar resultado'; }
+}
+
+function guardarMesaFiscal(mesa, escuela) {
+  const f = miFiscalia();
+  fx({ mesa: String(mesa || ''), escuela: escuela || '', circuito: f.circuito || st.me.circuito || '' }).then(() => { st.fx.editMesa = false; toast(`Mesa ${mesa} guardada`); pintarFiscal(); });
+}
+
+function resumenActaHtml(acta, listas) {
+  const nombre = Object.fromEntries((listas || []).map((l) => [l.id, l.nombre]));
+  return `<div class="stack" style="gap:4px">${Object.entries(acta.votos || {}).map(([id, v]) => `<div class="row small" style="justify-content:space-between"><span>${esc(nombre[id] || 'Lista')}</span><b class="num">${v}</b></div>`).join('')}
+    <div class="row small muted" style="justify-content:space-between"><span>Blancos · nulos · recurridos · impugnados</span><span class="num">${acta.blancos || 0} · ${acta.nulos || 0} · ${acta.recurridos || 0} · ${acta.impugnados || 0}</span></div>
+    <div class="row small" style="justify-content:space-between"><b>Total</b><b class="num">${acta.total}</b></div>
+    ${acta.sumaOk === false ? '<div class="small" style="color:var(--bad)">La suma no coincide con el total.</div>' : ''}</div>`;
+}
+
+// ---------------------------------------------------------------- FISCALIZACIÓN (conducción)
+const fiscalesSinAcceso = () => st.personas.filter((p) => p.tipo && p.tipo !== 'votante' && !st.usuarios.some((u) => u.dni === p.dni));
+
+function calcularEscrutinio(fs) {
+  const porMesa = {};
+  for (const f of fs) if (f.acta && f.mesa) { if (!porMesa[f.mesa] || ms(f.actaAt) > ms(porMesa[f.mesa].actaAt)) porMesa[f.mesa] = f; }
+  const mesas = Object.values(porMesa);
+  const r = { mesas: mesas.length, tot: {}, blancos: 0, nulos: 0, otros: 0, circ: {} };
+  for (const m of mesas) {
+    const c = (r.circ[m.circuito || '–'] ||= { mesas: 0, tot: {}, blancos: 0 });
+    c.mesas++;
+    for (const [id, v] of Object.entries(m.acta.votos || {})) { r.tot[id] = (r.tot[id] || 0) + (+v || 0); c.tot[id] = (c.tot[id] || 0) + (+v || 0); }
+    r.blancos += +m.acta.blancos || 0; c.blancos += +m.acta.blancos || 0;
+    r.nulos += +m.acta.nulos || 0; r.otros += (+m.acta.recurridos || 0) + (+m.acta.impugnados || 0);
+  }
+  return r;
+}
+
+function barrasListas(tot, blancos, listas) {
+  const validos = Object.values(tot).reduce((a, b) => a + b, 0) + blancos;
+  const filas = (listas || []).map((l) => ({ n: l.nombre, v: tot[l.id] || 0 })).sort((a, b) => b.v - a.v);
+  filas.push({ n: 'En blanco', v: blancos, gris: true });
+  return filas.map((f, i) => `<div><div class="row small" style="justify-content:space-between;gap:8px"><span style="font-weight:${i === 0 && !f.gris ? 800 : 600}">${esc(f.n)}</span><span class="num"><b>${validos ? (f.v * 100 / validos).toFixed(1).replace('.', ',') : '0'}%</b> <span class="muted">· ${f.v.toLocaleString('es-AR')}</span></span></div>
+    <div class="bar" style="margin-top:4px"><i style="width:${validos ? (f.v * 100 / validos) : 0}%;${f.gris ? 'background:var(--muted)' : ''}"></i></div></div>`).join('');
+}
+
+function pintarFiscalizacion() {
+  const el = $('#fiscalizacion');
+  if (!el) return;
+  const fs = st.fiscalias || [];
+  const sinAcceso = fiscalesSinAcceso();
+  const listas = st.me.listas || [];
+  if (!fs.length && !sinAcceso.length) { el.innerHTML = ''; return; }
+  const presentes = fs.filter((f) => f.presente).length;
+  const incid = fs.reduce((a, f) => a + (f.incidencias || []).length, 0);
+  const mesasAsignadas = new Set(fs.map((f) => f.mesa).filter(Boolean)).size;
+  const esc_ = calcularEscrutinio(fs);
+  const circs = Object.keys(esc_.circ).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  el.innerHTML = `
+    <div class="sec-title"><h2>Fiscalización</h2></div>
+    <div class="tiles">
+      <div class="tile t-acc"><b>${fs.length}</b><span>fiscales con acceso</span></div>
+      <div class="tile ${presentes === fs.length && fs.length ? 't-ok' : 't-warn'}"><b>${presentes}/${fs.length}</b><span>ya están en su mesa</span></div>
+      <div class="tile ${incid ? 't-bad' : 't-neutral'}"><b>${incid}</b><span>incidencias</span></div>
+      <div class="tile t-ok"><b>${esc_.mesas}/${mesasAsignadas || 0}</b><span>mesas con acta</span></div>
+    </div>
+    ${sinAcceso.length ? `<button class="btn btn-sec" data-act="fiscales-acceso-todos">${ic('fiscal', 18)} Dar acceso a ${sinAcceso.length} ${sinAcceso.length === 1 ? 'fiscal' : 'fiscales'} cargados</button>` : ''}
+    ${esc_.mesas ? `<div class="card pad stack"><div><h3>Resultado parcial · ${esc_.mesas} ${esc_.mesas === 1 ? 'mesa' : 'mesas'}</h3><div class="muted small">Sobre votos válidos (listas + blanco), según las actas que cargaron tus fiscales. No es el resultado oficial.</div></div>
+        ${barrasListas(esc_.tot, esc_.blancos, listas)}
+        <div class="muted small">Nulos: ${esc_.nulos} · Recurridos e impugnados: ${esc_.otros}</div>
+        ${circs.length > 1 ? `<details class="small" data-recordar="porCirc" ${st.abiertosUI?.porCirc ? 'open' : ''}><summary>Por circuito</summary><div class="stack" style="margin-top:10px">${circs.map((c) => `<div class="stack" style="gap:6px"><b>Circuito ${esc(c)} · ${esc_.circ[c].mesas} mesas</b>${barrasListas(esc_.circ[c].tot, esc_.circ[c].blancos, listas)}</div>`).join('')}</div></details>` : ''}
+      </div>` : (!listas.length && st.me.rol === 'cabeza' ? `<div class="aviso warn">${ic('alerta', 18)}<span>Cargá las listas en <b>Herramientas → Listas del escrutinio</b> para que los fiscales puedan pasar el acta.</span></div>` : '')}
+    ${fs.length ? `<details class="herr" data-recordar="verFiscales" ${st.abiertosUI?.verFiscales ? 'open' : ''}><summary><span class="herr-ic">${ic('fiscal', 20)}</span><span class="grow"><b>Ver fiscales</b><span class="muted small" style="display:block">Mesa, llegada, incidencias y acta de cada uno</span></span><span class="chev" aria-hidden="true">▸</span></summary>
+      <div class="herr-body stack" style="gap:6px">${[...fs].sort((a, b) => String(a.mesa || 'zz').localeCompare(String(b.mesa || 'zz'), 'es', { numeric: true })).map((f) => `
+        <button type="button" class="gente-item" data-act="fiscal-ver" data-id="${f.id}">
+          <span class="grow" style="text-align:left">${esc(f.nombre)}<span class="muted small" style="display:block">${f.mesa ? 'Mesa ' + esc(f.mesa) + (f.escuela ? ' · ' + esc(f.escuela) : '') : 'Sin mesa cargada'}</span></span>
+          <span class="tags" style="margin:0;justify-content:flex-end">
+            <span class="pill ${f.presente ? 'p-ok' : 'p-neutral'}">${f.presente ? 'En mesa' : 'No llegó'}</span>
+            ${(f.incidencias || []).length ? `<span class="pill p-bad">${f.incidencias.length} inc.</span>` : ''}
+            ${f.acta ? '<span class="pill p-acc">Acta</span>' : ''}
+          </span>
+        </button>`).join('')}</div></details>` : ''}`;
+}
+
+function hojaFiscal(id) {
+  const f = st.fiscalias.find((x) => x.id === id);
+  if (!f) return;
+  const wa = waUrl(f.tel);
+  abrirHoja(`
+    <div class="row"><div class="grow"><h2>${esc(f.nombre)}</h2><div class="muted num">Fiscal · DNI ${fmtDni(f.dni)}</div></div>
+      ${wa ? `<a class="icon-btn wa" href="${wa}" target="_blank" rel="noopener" aria-label="WhatsApp">${ic('wa')}</a>` : ''}
+      <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    <div class="card pad stack" style="gap:6px">
+      <div><span class="muted small">Fiscaliza</span><div><b>${f.mesa ? 'Mesa ' + esc(f.mesa) : 'Todavía no cargó la mesa'}</b>${f.escuela ? ' · ' + esc(f.escuela) : ''}</div></div>
+      ${f.votaMesa ? `<div><span class="muted small">Vota en</span><div>${esc(f.votaEscuela || '')} · Mesa ${esc(f.votaMesa)}</div></div>` : ''}
+      <div>${f.presente ? `<span class="pill p-ok">En la mesa desde las ${hora(f.presenteAt)}</span>` : '<span class="pill p-neutral">Todavía no avisó que llegó</span>'}</div>
+    </div>
+    ${(f.incidencias || []).length ? `<div class="card pad stack" style="gap:6px"><h3>Incidencias</h3>${[...f.incidencias].reverse().map((i) => `<div class="inc"><span class="muted small num">${hora(i.at)}</span> ${esc(i.texto)}</div>`).join('')}</div>` : ''}
+    ${f.acta ? `<div class="card pad stack"><h3>Acta · enviada ${hora(f.actaAt)}</h3>${resumenActaHtml(f.acta, st.me.listas)}
+      ${f.tieneFoto ? `<button class="btn btn-sec" data-act="fiscal-ver-acta" data-id="${f.id}">Ver foto del acta</button>` : '<div class="muted small">No subió foto.</div>'}<div id="acta-img"></div></div>` : ''}
+    ${usuarioPorId(f.id) ? `<button class="btn btn-ghost" data-act="fiscal-quitar" data-id="${f.id}">Quitarle el acceso</button>` : ''}`, { tipo: 'fiscal' });
+}
+
+function hojaAccesoFiscal(dnis) {
+  const ps = dnis.map((d) => st.personas.find((p) => p.dni === d)).filter(Boolean);
+  if (!ps.length) return;
+  abrirHoja(`
+    <div class="row"><h2 class="grow">Acceso para ${ps.length === 1 ? esc(primerNombre(ps[0].nombre)) : ps.length + ' fiscales'}</h2><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    <div class="muted">Entran con su DNI y una contraseña que genera la app. Solo ven su mesa: cargan la mesa que fiscalizan, avisan cuando llegan, mandan incidencias y el acta.</div>
+    <div class="card pad small stack" style="gap:4px;max-height:200px;overflow:auto">${ps.map((p) => `<div>${esc(p.nombre)} <span class="muted num">· DNI ${fmtDni(p.dni)}</span></div>`).join('')}</div>
+    <div id="acc-res" class="stack"></div>
+    <button class="btn btn-full" id="acc-btn" data-act="acc-crear" data-dnis="${ps.map((p) => p.dni).join(',')}">Crear ${ps.length === 1 ? 'acceso' : ps.length + ' accesos'}</button>`, { tipo: 'acceso' });
+}
+
+async function crearAccesosFiscales(dnis) {
+  const btn = $('#acc-btn'); btn.disabled = true; btn.textContent = 'Creando…';
+  const res = $('#acc-res'); const link = location.origin + location.pathname;
+  const filas = [];
+  for (const dni of dnis) {
+    const p = st.personas.find((x) => x.dni === dni);
+    if (!p) continue;
+    let padre = usuarioPorId(p.ownerId);
+    if (!padre || padre.rol === 'fiscal') padre = st.me;
+    const pass = String(Math.floor(100000 + Math.random() * 900000));
+    try {
+      const r = await S.crearUsuario({ dni: p.dni, nombre: p.nombre, tel: p.tel, rol: 'fiscal', pass, padre });
+      const fiscal = { uid: r.uid, nombre: p.nombre, dni: p.dni, tel: p.tel, path: [...padre.path, r.uid] };
+      await S.crearFiscalia(fiscal, { votaEscuela: p.escuela || '', votaMesa: p.mesa || '', circuito: p.circuito || '', tipo: p.tipo });
+      const msg = `Hola ${primerNombre(p.nombre)}! Vas a ser fiscal${p.tipo === 'fiscal_suplente' ? ' suplente' : ''} de ${st.me.campania}. Entrá en ${link}\nDNI: ${p.dni}\nContraseña: ${r.reactivado ? 'la misma que usabas antes' : pass}\nEl día de la elección cargá ahí tu mesa, avisá cuando llegues y al final mandá la foto del acta.`;
+      filas.push(`<div class="card pad row"><div class="grow"><b>${esc(p.nombre)}</b><div class="muted small num">DNI ${fmtDni(p.dni)} · clave ${r.reactivado ? '(la de antes)' : pass}</div></div>${waUrl(p.tel, msg) ? `<a class="icon-btn wa" href="${waUrl(p.tel, msg)}" target="_blank" rel="noopener" aria-label="Mandar acceso por WhatsApp">${ic('wa')}</a>` : `<button class="icon-btn" data-act="copiar" data-txt="${esc(msg)}" aria-label="Copiar mensaje">${ic('mas3')}</button>`}</div>`);
+    } catch (e) {
+      filas.push(`<div class="card pad"><b>${esc(p.nombre)}</b><div class="error">${esc(mensajeError(e))}</div></div>`);
+    }
+    res.innerHTML = filas.join('');
+  }
+  btn.remove();
+  res.insertAdjacentHTML('afterbegin', `<div class="aviso ok">${ic('ok', 18)}<span>Listo. Mandale a cada uno su acceso por WhatsApp.</span></div>`);
+}
+
 // ---------------------------------------------------------------- cuenta
 function hojaCuenta() {
   const me = st.me;
@@ -1053,6 +1381,48 @@ const acciones = {
     try { st.resumen = await S.recalcularResumenPadron(); pintarTablero(); if (!st.resumen) toast('No hay padrón cargado'); }
     catch (e) { toast(mensajeError(e)); el.disabled = false; }
   },
+  'listas-guardar': async () => {
+    const nombres = $('#listas-txt').value.split('\n').map((x) => x.trim()).filter(Boolean);
+    const listas = nombres.map((n) => ({ id: idLista(n), nombre: n }));
+    try { await S.guardarListas(listas); st.me.listas = listas; toast(`${listas.length} listas guardadas`); pintarFiscalizacion(); }
+    catch (e) { toast(mensajeError(e)); }
+  },
+  'fiscal-acceso': (el) => hojaAccesoFiscal([el.dataset.dni]),
+  'acc-crear': (el) => crearAccesosFiscales(el.dataset.dnis.split(',')),
+  'fiscales-acceso-todos': () => hojaAccesoFiscal(fiscalesSinAcceso().map((p) => p.dni)),
+  'fiscal-ver': (el) => hojaFiscal(el.dataset.id),
+  'fiscal-ver-acta': async (el) => {
+    const box = $('#acta-img');
+    box.innerHTML = '<div class="muted">Cargando foto…</div>';
+    try {
+      const img = await S.leerActa(el.dataset.id);
+      box.innerHTML = img ? `<a href="${img}" target="_blank" rel="noopener"><img src="${img}" alt="Foto del acta" style="width:100%;border-radius:12px;border:1px solid var(--line)"></a><div class="muted small">Tocá la foto para verla grande.</div>` : '<div class="muted">No subió foto.</div>';
+    } catch (e) { box.innerHTML = `<div class="error">${esc(mensajeError(e))}</div>`; }
+  },
+  'fiscal-quitar': async (el) => {
+    const u = usuarioPorId(el.dataset.id);
+    if (!u) { toast('Ese fiscal no tiene acceso'); return; }
+    try { await S.quitarUsuario(u, [], null); cerrarHoja(); toast(`${primerNombre(u.nombre)} ya no puede entrar`); } catch (e) { toast(mensajeError(e)); }
+  },
+  // --- pantalla del fiscal
+  'fx-misma': () => { const f = miFiscalia(); guardarMesaFiscal(f.votaMesa, f.votaEscuela); },
+  'fx-guardar-mesa': () => {
+    const mesa = normDni($('#fx-mesa').value);
+    const escuela = $('#fx-escuela').value.trim();
+    if (!mesa) { $('#fx-err-mesa').textContent = 'Escribí el número de mesa.'; return; }
+    guardarMesaFiscal(mesa, escuela);
+  },
+  'fx-cambiar-mesa': () => { st.fx.editMesa = true; pintarFiscal(); },
+  'fx-presente': async () => { await S.actualizarFiscalia(st.me.uid, { presente: true, presenteAt: Date.now() }); toast('Listo, avisaste que estás en la mesa'); pintarFiscal(); },
+  'fx-inc-rapida': (el) => { const t = $('#fx-inc'); t.value = el.dataset.v; t.focus(); },
+  'fx-inc-enviar': async () => {
+    const t = $('#fx-inc'); const texto = t.value.trim();
+    if (!texto) { t.focus(); return; }
+    await S.agregarIncidencia(st.me.uid, texto); t.value = ''; toast('Incidencia enviada'); pintarFiscal();
+  },
+  'fx-foto-otra': () => { st.fx.foto = null; pintarFiscal(); },
+  'fx-enviar-acta': enviarActa,
+  'fx-corregir': () => { const f = miFiscalia(); st.fx.corrigiendo = true; st.fx.votos = { ...(f.acta?.votos || {}), blancos: f.acta?.blancos, nulos: f.acta?.nulos, recurridos: f.acta?.recurridos, impugnados: f.acta?.impugnados, total: f.acta?.total }; pintarFiscal(); },
   'eq-ver-gente': (el) => { st.tab = 'gente'; st.f = { estado: 'todos', q: '', de: el.dataset.uid, limite: 60 }; pintar(); },
   copiar: async (el) => {
     try { await navigator.clipboard.writeText(el.dataset.txt); toast('Mensaje copiado'); }
@@ -1118,6 +1488,7 @@ document.addEventListener('submit', async (e) => {
 let tBusqueda = null;
 document.addEventListener('input', (e) => {
   const id = e.target.id;
+  if (e.target.dataset?.voto) { st.fx.votos[e.target.dataset.voto] = e.target.value; actualizarSumaActa(); }
   if (id === 'q') { st.f.q = e.target.value; st.f.limite = 60; clearTimeout(tBusqueda); tBusqueda = setTimeout(pintarLista, 150); }
   if (id === 'c-dni') {
     st.c.dniTxt = e.target.value;
@@ -1125,6 +1496,12 @@ document.addEventListener('input', (e) => {
     else if (st.c.fase !== 'inicio') { st.c = { fase: 'inicio', dniTxt: e.target.value }; pintarCargar(); }
   }
 });
+
+// Recordar qué desplegables quedaron abiertos cuando se redibuja con datos nuevos
+document.addEventListener('toggle', (e) => {
+  const k = e.target?.dataset?.recordar;
+  if (k) (st.abiertosUI ||= {})[k] = e.target.open;
+}, true);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.id === 'c-dni') { e.preventDefault(); buscarDni(); }
@@ -1140,6 +1517,7 @@ document.addEventListener('change', async (e) => {
     if (id === 'p-nota') { await S.actualizarPersona(dni, { nota: e.target.value.trim(), revisar: false }); toast('Nota guardada'); }
     if (id === 'p-tipo') { await S.actualizarPersona(dni, { tipo: e.target.value }); }
   }
+  if (id === 'fx-foto' && e.target.files[0]) tomarFotoActa(e.target.files[0]);
   if (id === 'imp-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'imp');
   if (id === 'fis-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'fis');
   if (id === 'pad-file' && e.target.files[0]) analizarPadron(e.target.files[0]);

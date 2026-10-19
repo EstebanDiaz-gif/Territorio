@@ -8,7 +8,7 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore,
   doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where, onSnapshot,
-  writeBatch, serverTimestamp, getCountFromServer, getDocs
+  writeBatch, serverTimestamp, getCountFromServer, getDocs, arrayUnion
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 export const modo = 'firebase';
@@ -34,7 +34,7 @@ async function cargarMe(uid) {
   const u = await getDoc(D('usuarios', uid));
   if (!u.exists()) throw Object.assign(new Error('Tu usuario fue dado de baja de la campaña'), { code: 'sin-campania' });
   const camp = await getDoc(doc(db, 'campanias', cid));
-  me = { ...u.data(), uid, campania: camp.data()?.nombre || '' };
+  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [] };
   return me;
 }
 
@@ -282,4 +282,38 @@ export async function borrarPadron(onProgreso) {
 export async function contarPersonas() {
   const r = await getCountFromServer(deMiEquipo('personas'));
   return r.data().count;
+}
+
+// ---------- Fiscalización ----------
+// fiscalias/{uidFiscal}: mesa que fiscaliza, presente, incidencias y resultado del acta
+// actas/{uidFiscal}: la foto del acta (comprimida), aparte para no cargarla salvo que se pida
+export async function leerListas() {
+  const c = await getDoc(doc(db, 'campanias', cid));
+  return c.data()?.listas || [];
+}
+export function guardarListas(listas) {
+  return sinTrabar(updateDoc(doc(db, 'campanias', cid), { listas }));
+}
+export function watchFiscalias(cb) {
+  if (me.rol === 'fiscal') return onSnapshot(D('fiscalias', me.uid), (s) => cb(s.exists() ? [{ ...s.data(), id: s.id }] : []), (e) => console.error(e));
+  return onSnapshot(deMiEquipo('fiscalias'), (s) => cb(s.docs.map((d) => ({ ...d.data(), id: d.id }))), (e) => console.error(e));
+}
+export function crearFiscalia(fiscal, datos) {
+  return sinTrabar(setDoc(D('fiscalias', fiscal.uid), {
+    fiscalUid: fiscal.uid, nombre: fiscal.nombre, dni: fiscal.dni, tel: fiscal.tel || '', path: fiscal.path,
+    presente: false, incidencias: [], mesa: '', escuela: '', ...datos, creado: serverTimestamp()
+  }, { merge: true }));
+}
+export function actualizarFiscalia(fid, cambios) {
+  return sinTrabar(setDoc(D('fiscalias', fid), { ...cambios, actualizadoAt: serverTimestamp() }, { merge: true }));
+}
+export function agregarIncidencia(fid, texto) {
+  return sinTrabar(setDoc(D('fiscalias', fid), { incidencias: arrayUnion({ texto, at: Date.now() }), actualizadoAt: serverTimestamp() }, { merge: true }));
+}
+export function guardarActa(fid, img, path) {
+  return sinTrabar(setDoc(D('actas', fid), { img, path, at: serverTimestamp() }), 15000);
+}
+export async function leerActa(fid) {
+  const s = await getDoc(D('actas', fid));
+  return s.exists() ? s.data().img : null;
 }

@@ -6,17 +6,20 @@ export const ROL_LABEL = {
   cabeza: 'Cabeza',
   encargado: 'Encargado de circuito',
   dirigente: 'Dirigente',
-  movilizador: 'Movilizador'
+  movilizador: 'Movilizador',
+  fiscal: 'Fiscal'
 };
 
 export const ROL_CORTO = {
   cabeza: 'Cabeza',
   encargado: 'Encargado',
   dirigente: 'Dirigente',
-  movilizador: 'Movilizador'
+  movilizador: 'Movilizador',
+  fiscal: 'Fiscal'
 };
 
-export const nivel = (rol) => ROLES.indexOf(rol);
+// El fiscal no es parte de la cadena de mando: cuelga de quien lo cargó y solo ve su mesa
+export const nivel = (rol) => (rol === 'fiscal' ? 4 : ROLES.indexOf(rol));
 export const rolAbajo = (rol) => ROLES[nivel(rol) + 1] || null;
 
 export const ESTADOS = [
@@ -58,4 +61,11 @@ export function telWhatsApp(tel) {
   if (t.startsWith('0')) t = t.slice(1);
   t = t.replace(/^(\d{2,4})15(\d{6,8})$/, '$1$2');
   return '549' + t;
+}
+
+// Listas para el escrutinio: [{id, nombre}]. El id sale del texto para que no cambie si se reordenan.
+export function idLista(nombre) {
+  let h = 0;
+  for (const ch of String(nombre).trim().toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return 'l' + h.toString(36);
 }

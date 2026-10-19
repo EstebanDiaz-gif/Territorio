@@ -1,9 +1,9 @@
 // MODO DEMO: misma interfaz que store-firebase.js, pero todo se guarda en este navegador.
 // Sirve para mostrar y probar la app sin configurar nada. Los datos son inventados.
-import { bucketDe, padronAString, padronDeString, nivel } from './roles.js';
+import { bucketDe, padronAString, padronDeString, nivel, idLista } from './roles.js';
 
 export const modo = 'demo';
-const KEY = 'territorio-demo-v3';
+const KEY = 'territorio-demo-v4';
 const SESION = 'territorio-demo-sesion';
 let db = null;
 let me = null;
@@ -29,7 +29,7 @@ export async function init() {
   if (uid && db.usuarios[uid]) me = conCampania(db.usuarios[uid]);
   return me;
 }
-const conCampania = (u) => ({ ...u, campania: db.campania.nombre });
+const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [] });
 
 export async function login(dni, pass) {
   await espera();
@@ -70,7 +70,8 @@ export async function crearUsuario({ dni, nombre, tel, rol, pass, circuito, padr
   await espera();
   if (Object.values(db.usuarios).some((u) => u.dni === dni)) throw err('auth/email-already-in-use', 'Ese DNI ya tiene usuario');
   const esCabeza = rol === 'cabeza';
-  if (esCabeza ? me.rol !== 'cabeza' : (nivel(rol) !== nivel(sup.rol) + 1 || !(me.rol === 'cabeza' || sup.path.includes(me.uid)))) throw err('permission-denied', 'No podés crear ese rol');
+  const nivelOk = rol === 'fiscal' || nivel(rol) === nivel(sup.rol) + 1;
+  if (esCabeza ? me.rol !== 'cabeza' : (!nivelOk || me.rol === 'fiscal' || !(me.rol === 'cabeza' || sup.path.includes(me.uid)))) throw err('permission-denied', 'No podés crear ese rol');
   const uid = 'u' + Math.random().toString(36).slice(2, 9);
   db.usuarios[uid] = {
     uid, dni, nombre, tel: tel || '', rol,
@@ -231,6 +232,33 @@ export async function duenoDe(dni) {
   return me.rol === 'cabeza' && p ? { nombre: p.nombre, ownerNombre: p.ownerNombre } : null;
 }
 
+// ---------- Fiscalización ----------
+export async function leerListas() { return db.campania.listas || []; }
+export async function guardarListas(listas) { db.campania.listas = listas; if (me) me.listas = listas; guardar(); }
+export function watchFiscalias(cb) {
+  const f = () => cb(Object.values(db.fiscalias || {}).filter((x) => me.rol === 'cabeza' || x.path.includes(me.uid)));
+  subs.add(f); f();
+  return () => subs.delete(f);
+}
+export async function crearFiscalia(fiscal, datos) {
+  (db.fiscalias ||= {})[fiscal.uid] = { id: fiscal.uid, fiscalUid: fiscal.uid, nombre: fiscal.nombre, dni: fiscal.dni, tel: fiscal.tel || '', path: fiscal.path, presente: false, incidencias: [], mesa: '', escuela: '', ...datos };
+  guardar();
+}
+export async function actualizarFiscalia(fid, cambios) {
+  Object.assign((db.fiscalias ||= {})[fid] ||= { id: fid, incidencias: [] }, cambios, { actualizadoAt: ahora() });
+  guardar();
+  return { ok: true };
+}
+export async function agregarIncidencia(fid, texto) {
+  const x = db.fiscalias[fid];
+  x.incidencias = [...(x.incidencias || []), { texto, at: ahora() }];
+  guardar();
+}
+// En la demo la foto se guarda solo mientras la página está abierta (no entra en el almacenamiento del navegador)
+const actasMem = {};
+export async function guardarActa(fid, img) { actasMem[fid] = img; return { ok: true }; }
+export async function leerActa(fid) { return actasMem[fid] || null; }
+
 // ---------- Datos de ejemplo ----------
 function semilla() {
   let s = 7;
@@ -299,8 +327,22 @@ function semilla() {
     const uid = pick(porCircuito[r.circuito]);
     asignar(r, uid, { estado: pick(estados), voto: rnd() < 0.3 });
   }
+  // Fiscal de ejemplo (entra con DNI 40431477, clave 1234) y otros con resultados ya cargados
+  const listas = ['Lista 501 · Frente Demo', 'Lista 502 · Otra fuerza', 'Lista 503 · Tercera vía'].map((n) => ({ id: idLista(n), nombre: n }));
+  U('fis1', 'Nadia Yasmín', '40431477', 'fiscal', 'mov1', null, '3815000013');
+  const fiscalias = {};
+  const F = (uid, nombre, dni, padre, extra) => {
+    const path = padre ? [...usuarios[padre].path, uid] : [uid];
+    fiscalias[uid] = { id: uid, fiscalUid: uid, nombre, dni, tel: '', path, presente: false, incidencias: [], mesa: '', escuela: '', ...extra };
+  };
+  F('fis1', 'Nadia Yasmín', '40431477', 'mov1', { votaEscuela: 'Esc. Manuel Belgrano', votaMesa: '1043', circuito: '19' });
+  const votos = (a, b, c) => ({ [listas[0].id]: a, [listas[1].id]: b, [listas[2].id]: c });
+  F('fx1', 'Mónica Romano', '43500197', 'mov2', { mesa: '1044', escuela: 'Esc. Manuel Belgrano', circuito: '19', presente: true, presenteAt: Date.now() - 9 * 36e5, acta: { votos: votos(112, 74, 21), blancos: 6, nulos: 3, recurridos: 0, impugnados: 0, total: 216 }, actaAt: Date.now() - 20 * 6e4, tieneFoto: false });
+  F('fx2', 'Vanesa Gutiérrez', '28966863', 'mov3', { mesa: '1051', escuela: 'Esc. D. F. Sarmiento', circuito: '19', presente: true, presenteAt: Date.now() - 9 * 36e5, incidencias: [{ texto: 'Faltan boletas de nuestra lista', at: Date.now() - 5 * 36e5 }] });
+  F('fx3', 'Oscar Díaz', '17696513', 'mov4', { mesa: '1102', escuela: 'Esc. Juan B. Alberdi', circuito: '20', presente: true, presenteAt: Date.now() - 9 * 36e5, acta: { votos: votos(98, 101, 15), blancos: 4, nulos: 2, recurridos: 1, impugnados: 0, total: 221 }, actaAt: Date.now() - 20 * 6e4, tieneFoto: false });
+  F('fx4', 'Silvia Alvarado', '32110664', 'mov5', { mesa: '1110', escuela: 'Esc. Gral. San Martín', circuito: '20', presente: false });
   return {
-    campania: { nombre: 'Frente Demo 2027' },
-    usuarios, claves, padron, personas, conflictos: {}
+    campania: { nombre: 'Frente Demo 2027', listas },
+    usuarios, claves, padron, personas, conflictos: {}, fiscalias
   };
 }
