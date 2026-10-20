@@ -49,7 +49,7 @@ service cloud.firestore {
 
       allow read: if miembro();
       allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias']);
+      allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias', 'alertas']);
 
       // ---------- Usuarios ----------
       match /usuarios/{uid} {

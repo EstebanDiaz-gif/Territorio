@@ -60,7 +60,7 @@ async function cargarMe(uid) {
   if (!activo) throw Object.assign(new Error('Tu usuario fue dado de baja de la campaña. Pedile a quien te suma que te vuelva a agregar.'), { code: 'sin-campania' });
   const u = await getDoc(D('usuarios', uid));
   const camp = await getDoc(doc(db, 'campanias', cid));
-  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [] };
+  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [], alertas: camp.data()?.alertas || null };
   return me;
 }
 
@@ -364,6 +364,9 @@ export async function contarPersonas() {
 export async function leerListas() {
   const c = await getDoc(doc(db, 'campanias', cid));
   return { listas: c.data()?.listas || [], categorias: c.data()?.categorias || [] };
+}
+export function guardarAlertas(alertas) {
+  return sinTrabar(updateDoc(doc(db, 'campanias', cid), { alertas }));
 }
 export function guardarListas(listas, categorias) {
   return sinTrabar(updateDoc(doc(db, 'campanias', cid), { listas, categorias }));

@@ -55,9 +55,9 @@ const conteos = {}; const pidiendo = {};
 let tRefresco = null;
 const programarRefresco = () => { clearTimeout(tRefresco); tRefresco = setTimeout(() => refrescar(), 150); };
 const invalidarConteos = () => { for (const k in conteos) conteos[k].t = 0; };
-function conteo(clave, filtros) {
+function conteo(clave, filtros, ttl = 45000) {
   const c = conteos[clave];
-  if ((!c || Date.now() - c.t > 45000) && !pidiendo[clave]) {
+  if ((!c || Date.now() - c.t > ttl) && !pidiendo[clave]) {
     pidiendo[clave] = true;
     S.contar(filtros).then((n) => { conteos[clave] = { n, t: Date.now() }; programarRefresco(); })
       .catch((e) => { console.error('conteo', clave, e); conteos[clave] = { n: c?.n ?? null, t: Date.now() }; })
@@ -318,7 +318,7 @@ function pintar() {
   if (liviano()) { const viejo = Date.now() - 10000; for (const k in conteos) if (conteos[k].t < viejo) conteos[k].t = 0; }
   suscribirPagina();
   const v = { gente: vistaGente, cargar: vistaCargar, dia: vistaDia, equipo: vistaEquipo, panel: vistaPanel }[st.tab];
-  $('#main').innerHTML = v();
+  $('#main').innerHTML = '<div id="alertas"></div>' + v();
   refrescarPartes();
   window.scrollTo(0, 0);
 }
@@ -379,6 +379,7 @@ function refrescar() {
   refrescarPartes();
 }
 function refrescarPartes() {
+  pintarAlertas();
   if (st.tab === 'gente') pintarLista();
   if (st.tab === 'dia') pintarDia();
   if (st.tab === 'equipo') pintarEquipo();
@@ -728,6 +729,95 @@ function pintarDiaCabeza(el) {
     ${bloqueCircuitos({})}`;
 }
 
+// ---------------------------------------------------------------- ALERTAS DEL DÍA E
+// La cabeza define pasos: "a tal hora, si alguien lleva menos de X% de su gente votando, avisar a N niveles de arriba".
+const NIVELES_ALERTA = [[1, 'Al superior directo'], [2, 'A los 2 de arriba'], [3, 'A los 3 de arriba'], [99, 'A todos, hasta la cabeza']];
+const alertasPorDefecto = () => ({ fecha: '', minimo: 5, pasos: [{ hora: '12:00', pct: 30, niveles: 1 }, { hora: '13:00', pct: 40, niveles: 2 }, { hora: '14:00', pct: 50, niveles: 99 }] });
+const hoyISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const horaAhora = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+function pasoActual(cfg) {
+  if (!cfg?.fecha || cfg.fecha !== hoyISO()) return null;
+  const ya = (cfg.pasos || []).filter((p) => p.hora && p.hora <= horaAhora()).sort((a, b) => a.hora.localeCompare(b.hora));
+  return ya[ya.length - 1] || null;
+}
+function alertasParaMi() {
+  const cfg = st.me?.alertas; const paso = pasoActual(cfg);
+  if (!paso || st.me.rol === 'fiscal' || st.me.rol === 'movilizador') return { paso: null, lista: [] };
+  const cont = liviano() ? null : conteoPorUsuario();
+  const lista = [];
+  for (const u of st.usuarios) {
+    if (u.uid === st.me.uid || !['encargado', 'dirigente', 'movilizador'].includes(u.rol)) continue;
+    // a cuántos niveles de distancia estoy por encima de esa persona
+    const i = (u.path || []).indexOf(st.me.uid);
+    const dist = i >= 0 ? u.path.length - 1 - i : (st.me.rol === 'cabeza' ? 98 : null);
+    if (dist == null || dist > paso.niveles) continue;
+    const [n, v] = cont ? (cont[u.uid] || [0, 0])
+      : [conteo('u' + u.uid, [['path', 'array-contains', u.uid]], 300000), conteo('uv' + u.uid, [['path', 'array-contains', u.uid], ['voto', '==', true]], 300000)];
+    if (n == null || v == null || n < (cfg.minimo || 5)) continue;
+    const p = pct(v, n);
+    if (p < paso.pct) lista.push({ u, n, v, p });
+  }
+  return { paso, lista: lista.sort((a, b) => a.p - b.p) };
+}
+const alertasVistas = new Set();
+function pintarAlertas() {
+  const el = $('#alertas');
+  if (!el || !st.me) return;
+  const { paso, lista } = alertasParaMi();
+  if (!lista.length) { el.innerHTML = ''; return; }
+  const nuevas = lista.filter((a) => !alertasVistas.has(paso.hora + a.u.uid));
+  if (nuevas.length) {
+    nuevas.forEach((a) => alertasVistas.add(paso.hora + a.u.uid));
+    try { navigator.vibrate?.([200, 100, 200]); } catch { /* */ }
+    toast(nuevas.length === 1 ? `Alerta: ${nuevas[0].u.nombre} lleva ${nuevas[0].p}%` : `${nuevas.length} alertas nuevas de movilización`);
+  }
+  const abierto = st.abiertosUI?.alertas ?? true;
+  el.innerHTML = `<details class="card alerta-card" data-recordar="alertas" ${abierto ? 'open' : ''}>
+    <summary><span style="color:var(--bad)">${ic('alerta', 20)}</span>
+      <span class="grow"><b>${lista.length} ${lista.length === 1 ? 'persona moviliza' : 'personas movilizan'} poco</b>
+      <span class="muted small" style="display:block">Desde las ${esc(paso.hora)}: menos del ${paso.pct}% de su gente votó</span></span><span class="chev" aria-hidden="true">▸</span></summary>
+    ${lista.map(({ u, n, v, p }) => {
+      const wa = waUrl(u.tel, `Hola ${primerNombre(u.nombre)}! ¿Cómo vienen? Van ${v} de ${n} votando (${p}%). Necesitamos apurar la movilización.`);
+      return `<div class="votante"><div class="grow"><div style="font-weight:600">${esc(u.nombre)}</div>
+        <div class="small"><span class="pill p-bad">${p}%</span> <span class="muted">${ROL_CORTO[u.rol]} · ${fmtN(v)} de ${fmtN(n)} votaron${u.circuito ? ' · ' + esc(textoCircuitos(u, true)) : ''}</span></div></div>
+        ${wa ? `<a class="icon-btn wa" href="${wa}" target="_blank" rel="noopener" aria-label="WhatsApp a ${esc(u.nombre)}">${ic('wa')}</a>` : ''}
+        <button class="btn btn-sec btn-sm" data-act="eq-ver-gente" data-uid="${u.uid}">Ver</button></div>`;
+    }).join('')}
+  </details>`;
+}
+setInterval(() => { if (st.me && st.me.rol !== 'fiscal' && document.visibilityState === 'visible') pintarAlertas(); }, 60000);
+
+function htmlConfigAlertas() {
+  st.alEdit ||= JSON.parse(JSON.stringify(st.me.alertas || alertasPorDefecto()));
+  const c = st.alEdit;
+  return `<div class="muted">El día de la elección, a cada hora que pongas, la app revisa cuánta gente de cada uno ya votó. Si alguien está por debajo del porcentaje, les aparece una alerta a los de arriba que elijas.</div>
+    <div class="row wrap">
+      <div class="grow"><label class="label" for="al-fecha">Fecha de la elección</label><input id="al-fecha" type="date" class="input" value="${esc(c.fecha || '')}"></div>
+      <div style="width:130px"><label class="label" for="al-min">Mínimo de gente</label><input id="al-min" type="number" min="1" class="input num" value="${esc(c.minimo || 5)}"></div>
+    </div>
+    <div class="muted small">Solo se evalúa a quien tenga al menos esa cantidad de gente cargada.</div>
+    <div class="stack" id="al-pasos">${(c.pasos || []).map((p, i) => `<div class="card pad stack al-paso" data-i="${i}" style="gap:8px">
+      <div class="row"><b class="grow">Paso ${i + 1}</b><button type="button" class="btn btn-ghost btn-sm" data-act="al-quitar" data-i="${i}">Quitar</button></div>
+      <div class="row wrap" style="gap:8px">
+        <div class="grow"><label class="label">A las</label><input type="time" class="input al-hora" value="${esc(p.hora)}"></div>
+        <div class="grow"><label class="label">Menos del</label><div class="row" style="gap:4px"><input type="number" min="1" max="100" class="input num al-pct" value="${esc(p.pct)}"><b>%</b></div></div>
+      </div>
+      <div><label class="label">Avisar</label><select class="input al-niv">${NIVELES_ALERTA.map(([k, l]) => `<option value="${k}" ${+p.niveles === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>`).join('')}</div>
+    <button type="button" class="btn btn-sec" data-act="al-agregar">${ic('mas')} Agregar paso</button>
+    <div class="error" id="al-err" role="alert"></div>
+    <button class="btn" data-act="al-guardar">Guardar alertas</button>`;
+}
+function leerConfigAlertas() {
+  const c = st.alEdit;
+  c.fecha = $('#al-fecha')?.value || '';
+  c.minimo = Math.max(1, parseInt($('#al-min')?.value, 10) || 5);
+  c.pasos = [...document.querySelectorAll('.al-paso')].map((d) => ({
+    hora: d.querySelector('.al-hora').value, pct: Math.min(100, Math.max(1, parseInt(d.querySelector('.al-pct').value, 10) || 30)), niveles: +d.querySelector('.al-niv').value
+  }));
+  return c;
+}
+const repintarConfigAlertas = () => { const b = $('#h-alertas .herr-body'); if (b) b.innerHTML = htmlConfigAlertas(); };
+
 // ---------------------------------------------------------------- UBICACIÓN (GPS)
 // Mientras la app está abierta, cada uno comparte dónde está; sus superiores lo ven en el Día E.
 const gps = { watchId: null, ultimo: null, ultimoEnvio: 0, error: '', lock: null, pantalla: false };
@@ -1053,6 +1143,7 @@ function vistaPanel() {
         <textarea id="cats-txt" class="input" rows="3" placeholder="Gobernador&#10;Legisladores&#10;Concejales">${esc((st.me.categorias || []).map((l) => l.nombre).join('\n'))}</textarea>
         <div class="muted small" style="margin-top:4px">Si la elección tiene una sola categoría, dejalo vacío.</div></div>
         <button class="btn" data-act="listas-guardar">Guardar</button>`) : ''}
+      ${st.me.rol === 'cabeza' ? herr('alertas', 'alerta', 'Alertas del Día E', 'Avisar si alguien moviliza poco', htmlConfigAlertas()) : ''}
       ${herr('excel', 'bajar', 'Descargar Excel', 'Toda la gente de tu equipo', `
         <button class="btn btn-sec" data-act="exportar">${ic('bajar')} Descargar Excel</button>`)}
       ${st.me.rol === 'cabeza' ? herr('borrar', 'alerta', 'Borrar datos', 'Para empezar de nuevo', `
@@ -1844,6 +1935,16 @@ const acciones = {
       await S.guardarListas(listas, categorias); Object.assign(st.me, { listas, categorias });
       toast(`${listas.length} listas${categorias.length ? ' y ' + categorias.length + ' categorías' : ''} guardadas`); pintarFiscalizacion();
     } catch (e) { toast(mensajeError(e)); }
+  },
+  'al-agregar': () => { const c = leerConfigAlertas(); const u = c.pasos[c.pasos.length - 1]; c.pasos.push({ hora: u ? `${String(Math.min(23, +u.hora.slice(0, 2) + 1)).padStart(2, '0')}:00` : '12:00', pct: u ? Math.min(100, u.pct + 10) : 30, niveles: 99 }); repintarConfigAlertas(); },
+  'al-quitar': (el) => { const c = leerConfigAlertas(); c.pasos.splice(+el.dataset.i, 1); repintarConfigAlertas(); },
+  'al-guardar': async () => {
+    const c = leerConfigAlertas();
+    if (!c.fecha) { $('#al-err').textContent = 'Poné la fecha de la elección.'; return; }
+    if (c.pasos.some((p) => !p.hora)) { $('#al-err').textContent = 'Completá la hora de cada paso.'; return; }
+    c.pasos.sort((a, b) => a.hora.localeCompare(b.hora));
+    try { await S.guardarAlertas(c); st.me.alertas = JSON.parse(JSON.stringify(c)); alertasVistas.clear(); toast('Alertas guardadas'); repintarConfigAlertas(); pintarAlertas(); }
+    catch (e) { $('#al-err').textContent = mensajeError(e); }
   },
   'esc-cat': (el) => { st.catSel = el.dataset.c; pintarFiscalizacion(); },
   'fx-cat': (el) => { st.fx.cat = el.dataset.c; pintarFiscal(); const p = document.querySelector('[data-voto]'); p?.scrollIntoView({ block: 'center' }); },

@@ -38,7 +38,10 @@ export async function init() {
   if (uid && db.usuarios[uid]) me = conCampania(db.usuarios[uid]);
   return me;
 }
-const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [] });
+// En la demo, si no se configuraron alertas, se muestran unas de ejemplo con la fecha de hoy
+const hoyDemo = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const alertasDemo = () => ({ fecha: hoyDemo(), minimo: 5, pasos: [{ hora: '08:00', pct: 40, niveles: 1 }, { hora: '12:00', pct: 50, niveles: 2 }, { hora: '15:00', pct: 60, niveles: 99 }] });
+const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [], alertas: db.campania.alertas || alertasDemo() });
 
 export async function login(dni, pass) {
   await espera();
@@ -283,6 +286,7 @@ export async function listarPersonas(filtros = [], lim = 0) { await espera(60); 
 
 // ---------- Fiscalización ----------
 export async function leerListas() { return { listas: db.campania.listas || [], categorias: db.campania.categorias || [] }; }
+export async function guardarAlertas(alertas) { db.campania.alertas = alertas; if (me) me.alertas = alertas; guardar(); }
 export async function guardarListas(listas, categorias) { Object.assign(db.campania, { listas, categorias }); if (me) Object.assign(me, { listas, categorias }); guardar(); }
 export async function guardarUbicacion({ lat, lng, prec }) {
   db.ubicaciones[me.uid] = { uid: me.uid, lat, lng, prec: Math.round(prec || 0), at: Date.now(), activo: true };
