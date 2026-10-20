@@ -141,6 +141,7 @@ const todaLaGente = (filtros = []) => (liviano() ? S.listarPersonas(filtros) : P
 let tPagina = null;
 const resuscribir = () => { clearTimeout(tPagina); tPagina = setTimeout(suscribirPagina, 300); };
 setInterval(() => { if (st.me && liviano() && document.visibilityState === 'visible') { invalidarConteos(); refrescar(); } }, 45000);
+setInterval(() => { if (st.me && st.tab === 'dia' && st.me.rol !== 'fiscal' && document.visibilityState === 'visible' && !sheetCtx) pintarDia(); }, 30000);
 
 function mensajeError(e) {
   const c = e?.code || '';
@@ -219,19 +220,22 @@ function iniciarSesion(me) {
   st.c = { fase: 'inicio' };
   st.resumen = undefined; st.circAbiertos = null; st.abiertos = null;
   st.unsubs.forEach((u) => u());
-  st.fiscalias = []; st.fx = { votos: {} };
+  st.fiscalias = []; st.fx = { votos: {} }; st.ubic = [];
   st.unsubs = me.rol === 'fiscal'
     ? [S.watchFiscalias((x) => { st.fiscalias = x; refrescar(); })]
     : [
       S.watchUsuarios((x) => { st.usuarios = x; refrescar(); }),
       ...(me.rol === 'cabeza' ? [] : [S.watchPersonas((x) => { st.personas = x; refrescar(); })]),
       S.watchConflictos((x) => { st.conflictos = x; refrescar(); }),
-      S.watchFiscalias((x) => { st.fiscalias = x; refrescar(); })
+      S.watchFiscalias((x) => { st.fiscalias = x; refrescar(); }),
+      ...(['cabeza', 'encargado', 'dirigente'].includes(me.rol) ? [S.watchUbicaciones((x) => { st.ubic = x; if (st.tab === 'dia' || sheetCtx?.tipo === 'usuario') refrescar(); })] : [])
     ];
   pintar();
+  if (puedeCompartir() && gpsGuardado()) iniciarGps();
 }
 
 async function salir() {
+  detenerGps(false);
   st.unsubs.forEach((u) => u()); st.unsubs = [];
   st.unsubPagina?.(); st.unsubPagina = null; st.clavePagina = null; cachePersonas.clear();
   for (const k in conteos) delete conteos[k];
@@ -665,6 +669,8 @@ function pintarDia() {
   for (const p of st.personas) { const k = p.escuela || 'Sin escuela asignada'; totEsc[k] ||= [0, 0]; totEsc[k][0]++; if (p.voto) totEsc[k][1]++; }
   const orden = Object.keys(grupos).sort((a, b) => a.localeCompare(b));
   el.innerHTML = `
+    ${htmlMiUbicacion()}
+    ${htmlUbicacionesEquipo()}
     ${traslados.length ? `<div class="card">
       <div class="escuela-h"><span style="color:var(--warn)">${ic('auto', 22)}</span><div class="grow"><h3>${traslados.length} ${traslados.length === 1 ? 'traslado pendiente' : 'traslados pendientes'}</h3><div class="muted small">Necesitan que los lleven a votar</div></div></div>
       ${traslados.slice(0, 8).map((p) => `<div class="votante"><div class="grow"><div style="font-weight:600">${esc(p.nombre)}</div><div class="muted small">${esc(p.domicilio || p.escuela || '')}</div></div>
@@ -717,8 +723,103 @@ function pintarDiaCabeza(el) {
       <div class="row small num" style="justify-content:space-between"><span><b>${fmtN(s.voto)}</b> votaron</span><span><b>${fmtN(falta)}</b> faltan</span><span><b>${fmtN(s.total)}</b> cargados</span></div>
       <div class="muted small">Se actualiza solo. Cada movilizador marca a su gente en su celular; si querés marcar a alguien, buscalo en Gente.</div>
     </div>
+    ${htmlUbicacionesEquipo()}
     ${htmlTraslados(st.personas.filter((p) => p.estado === 'traslado' && !p.voto), s.trasPend)}
     ${bloqueCircuitos({})}`;
+}
+
+// ---------------------------------------------------------------- UBICACIÓN (GPS)
+// Mientras la app está abierta, cada uno comparte dónde está; sus superiores lo ven en el Día E.
+const gps = { watchId: null, ultimo: null, ultimoEnvio: 0, error: '', lock: null, pantalla: false };
+const puedeCompartir = () => ['encargado', 'dirigente', 'movilizador'].includes(st.me?.rol);
+const gpsClave = () => 'territorio-gps-' + st.me.uid;
+function gpsGuardado() { try { return localStorage.getItem(gpsClave()) === '1'; } catch { return false; } }
+function gpsRecordar(v) { try { if (v) localStorage.setItem(gpsClave(), '1'); else localStorage.removeItem(gpsClave()); } catch { /* sin almacenamiento */ } }
+const gpsActivo = () => gps.watchId != null;
+function distancia(a, b) {
+  const R = 6371000; const r = (x) => (x * Math.PI) / 180;
+  const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lng - a.lng) / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function iniciarGps() {
+  if (!('geolocation' in navigator)) { gps.error = 'Este celular no permite compartir la ubicación.'; refrescarGps(); return; }
+  if (gpsActivo()) return;
+  gps.watchId = navigator.geolocation.watchPosition(posicionNueva, (e) => {
+    gps.error = e.code === 1 ? 'No diste permiso de ubicación. Activalo en los ajustes del navegador para esta página.' : 'No se pudo obtener la ubicación. Probá al aire libre o con el GPS encendido.';
+    if (e.code === 1) detenerGps(false);
+    refrescarGps();
+  }, { enableHighAccuracy: true, maximumAge: 30000, timeout: 60000 });
+  if (gps.pantalla) pedirPantalla();
+}
+// Se guarda como mucho una vez por minuto si se movió, y cada 4 minutos si está quieto (cuida el cupo de Firebase)
+function posicionNueva(p) {
+  const c = { lat: p.coords.latitude, lng: p.coords.longitude, prec: p.coords.accuracy };
+  gps.error = '';
+  const ahora = Date.now(); const desde = ahora - gps.ultimoEnvio;
+  const movio = gps.ultimo ? distancia(gps.ultimo, c) : Infinity;
+  if (!gps.ultimoEnvio || (desde >= 60000 && movio >= 80) || desde >= 240000) {
+    gps.ultimo = c; gps.ultimoEnvio = ahora;
+    S.guardarUbicacion(c).catch((e) => { gps.error = mensajeError(e); refrescarGps(); });
+  }
+  refrescarGps();
+}
+function detenerGps(avisar = true) {
+  if (gps.watchId != null) navigator.geolocation.clearWatch(gps.watchId);
+  gps.watchId = null; gps.ultimo = null; gps.ultimoEnvio = 0;
+  soltarPantalla();
+  if (avisar) S.dejarUbicacion().catch(() => {});
+}
+async function pedirPantalla() {
+  try { if ('wakeLock' in navigator && !gps.lock && document.visibilityState === 'visible') { gps.lock = await navigator.wakeLock.request('screen'); gps.lock.addEventListener?.('release', () => { gps.lock = null; }); } } catch { /* no soportado */ }
+}
+function soltarPantalla() { try { gps.lock?.release(); } catch { /* */ } gps.lock = null; }
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !gpsActivo()) return;
+  if (Date.now() - gps.ultimoEnvio > 60000) gps.ultimoEnvio = 0; // al volver a la app, manda la posición enseguida
+  if (gps.pantalla) pedirPantalla();
+});
+const refrescarGps = () => { const el = $('#gps-card'); if (el) el.outerHTML = htmlMiUbicacion(); };
+const hace = (ms) => { const m = Math.floor((Date.now() - ms) / 60000); return m < 1 ? 'recién' : m < 60 ? `hace ${m} min` : `hace ${Math.floor(m / 60)} h ${m % 60 ? (m % 60) + ' min' : ''}`.trim(); };
+const horaCorta = (ms) => new Date(ms).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const verPuntoUrl = (x) => `https://www.google.com/maps/search/?api=1&query=${x.lat},${x.lng}`;
+const irPuntoUrl = (x) => `https://www.google.com/maps/dir/?api=1&destination=${x.lat},${x.lng}`;
+
+function htmlMiUbicacion() {
+  if (!puedeCompartir()) return '';
+  const on = gpsActivo();
+  const estado = gps.error ? `<span style="color:var(--bad)">${esc(gps.error)}</span>`
+    : on ? (gps.ultimoEnvio ? `Compartiendo · última vez ${horaCorta(gps.ultimoEnvio)}${gps.ultimo?.prec ? ` (±${Math.round(gps.ultimo.prec)} m)` : ''}` : 'Buscando tu ubicación…')
+      : 'No estás compartiendo tu ubicación';
+  return `<div class="card pad stack" id="gps-card">
+    <div class="row"><span style="color:${on ? 'var(--accent)' : 'var(--muted)'}">${ic('mapa', 24)}</span>
+      <div class="grow"><b>Mi ubicación</b><div class="muted small">${estado}</div></div>
+      <button class="btn btn-sm ${on ? 'btn-sec' : ''}" data-act="gps-toggle">${on ? 'Dejar de compartir' : 'Compartir'}</button></div>
+    ${on ? `<label class="check"><input type="checkbox" id="gps-pantalla" ${gps.pantalla ? 'checked' : ''}> Mantener la pantalla encendida (recomendado en el auto)</label>
+      <div class="muted small">Se actualiza mientras tengas la app abierta. Si la cerrás, tu equipo ve tu última ubicación.</div>`
+    : '<div class="muted small">Tus superiores ven dónde estás mientras tenés la app abierta. Sirve solo para organizar el día de la elección y lo podés apagar cuando quieras.</div>'}
+  </div>`;
+}
+
+// Para encargados, dirigentes y cabezas: dónde anda cada uno de su equipo
+function htmlUbicacionesEquipo() {
+  if (!['cabeza', 'encargado', 'dirigente'].includes(st.me.rol)) return '';
+  const equipo = (st.me.rol === 'cabeza' ? st.usuarios : miEquipo()).filter((u) => u.uid !== st.me.uid && ['encargado', 'dirigente', 'movilizador'].includes(u.rol));
+  if (!equipo.length) return '';
+  const pos = new Map((st.ubic || []).filter((x) => x.activo !== false && x.lat != null).map((x) => [x.uid, x]));
+  const con = equipo.filter((u) => pos.has(u.uid)).sort((a, b) => pos.get(b.uid).at - pos.get(a.uid).at);
+  const sin = equipo.filter((u) => !pos.has(u.uid));
+  const color = (ms) => { const m = (Date.now() - ms) / 60000; return m < 6 ? 'p-ok' : m < 20 ? 'p-warn' : 'p-neutral'; };
+  return `<div class="card">
+    <div class="escuela-h"><span style="color:var(--accent)">${ic('mapa', 22)}</span><div class="grow"><h3>Dónde está mi equipo</h3>
+      <div class="muted small">${con.length} de ${equipo.length} compartiendo ubicación</div></div></div>
+    ${con.map((u) => { const x = pos.get(u.uid); return `<div class="votante">
+      <div class="grow"><div style="font-weight:600">${esc(u.nombre)}</div>
+        <div class="small"><span class="pill ${color(x.at)}">${hace(x.at)}</span> <span class="muted">${ROL_CORTO[u.rol]} · ${horaCorta(x.at)}</span></div></div>
+      <a class="btn btn-sec btn-sm" href="${verPuntoUrl(x)}" target="_blank" rel="noopener">Ver</a>
+      <a class="btn btn-sm" href="${irPuntoUrl(x)}" target="_blank" rel="noopener">${ic('mapa', 16)} Ir</a></div>`; }).join('')}
+    ${sin.length ? `<details class="votante" style="display:block" data-recordar="ubic-sin" ${st.abiertosUI?.['ubic-sin'] ? 'open' : ''}><summary class="muted small">${sin.length} sin compartir ubicación</summary>
+      <div class="small" style="margin-top:6px">${sin.map((u) => `${esc(u.nombre)} <span class="muted">· ${ROL_CORTO[u.rol]}</span>`).join('<br>')}</div></details>` : ''}
+  </div>`;
 }
 
 // ---------------------------------------------------------------- EQUIPO
@@ -818,6 +919,9 @@ function hojaQuitarUsuario(uid) {
       <div class="grow"><h2>${esc(u.nombre)}</h2><div class="muted num">${ROL_LABEL[u.rol]} · DNI ${fmtDni(u.dni)}</div></div>
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
     ${rolAbajo(u.rol) ? `<button class="btn btn-full" data-act="nuevo-usuario" data-rol="${rolAbajo(u.rol)}" data-padre="${u.uid}">${ic('mas')} Agregar ${ROL_CORTO[rolAbajo(u.rol)].toLowerCase()} a su equipo</button>` : ''}
+    ${(() => { const x = (st.ubic || []).find((y) => y.uid === u.uid && y.activo !== false && y.lat != null); return x ? `<div class="card pad row">
+      <span style="color:var(--accent)">${ic('mapa', 22)}</span><div class="grow"><b>Última ubicación</b><div class="muted small">${hace(x.at)} · ${horaCorta(x.at)}</div></div>
+      <a class="btn btn-sec btn-sm" href="${verPuntoUrl(x)}" target="_blank" rel="noopener">Ver</a><a class="btn btn-sm" href="${irPuntoUrl(x)}" target="_blank" rel="noopener">Ir</a></div>` : ''; })()}
     <div class="card pad stack">
       <div><label class="label" for="qu-dom">Domicilio</label>
         <input id="qu-dom" class="input" maxlength="120" autocomplete="off" value="${esc(u.domicilio || '')}" placeholder="Calle y número, barrio"></div>
@@ -1199,7 +1303,7 @@ async function enParalelo(items, n, fn) {
 // ---------------------------------------------------------------- FISCALES
 const INCIDENCIAS_RAPIDAS = ['La mesa abrió tarde', 'Faltan boletas de nuestra lista', 'Problema con las autoridades de mesa', 'Me impiden fiscalizar', 'Problema en el conteo'];
 const miFiscalia = () => st.fiscalias.find((x) => x.id === st.me.uid || x.fiscalUid === st.me.uid) || {};
-const hora = (t) => { const d = new Date(ms(t)); return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }); };
+const hora = (t) => { const d = new Date(ms(t)); return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); };
 // Lo que guarda el fiscal lleva siempre su path (las reglas lo exigen)
 const fx = (cambios) => S.actualizarFiscalia(st.me.uid, { ...cambios, path: st.me.path, fiscalUid: st.me.uid, nombre: st.me.nombre, dni: st.me.dni });
 
@@ -1679,6 +1783,11 @@ const acciones = {
   'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol, el.dataset.padre || null),
   'eq-toggle': (el) => { const id = el.dataset.uid; if (st.abiertos.has(id)) st.abiertos.delete(id); else st.abiertos.add(id); pintarEquipo(); },
   'eq-opciones': (el) => hojaQuitarUsuario(el.dataset.uid),
+  'gps-toggle': () => {
+    if (gpsActivo()) { detenerGps(); gpsRecordar(false); toast('Dejaste de compartir tu ubicación'); }
+    else { gps.error = ''; gpsRecordar(true); iniciarGps(); }
+    refrescarGps();
+  },
   'eq-dom': async (el) => {
     const u = usuarioPorId(el.dataset.uid);
     const dom = $('#qu-dom').value.trim().slice(0, 120);
@@ -1894,6 +2003,7 @@ document.addEventListener('change', async (e) => {
     if (id === 'p-tipo') { await actualizarPersonaApp(dni, { tipo: e.target.value }); }
   }
   if (id === 'fx-foto' && e.target.files[0]) tomarFotoActa(e.target.files[0]);
+  if (id === 'gps-pantalla') { gps.pantalla = e.target.checked; if (gps.pantalla) pedirPantalla(); else soltarPantalla(); }
   if (id === 'imp-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'imp');
   if (id === 'fis-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'fis');
   if (id === 'pad-file' && e.target.files[0]) analizarPadron(e.target.files[0]);

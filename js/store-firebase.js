@@ -143,6 +143,20 @@ export async function actualizarUsuario(uid, cambios) {
   return sinTrabar(updateDoc(D('usuarios', uid), cambios));
 }
 
+// ----- ubicación (GPS) del día de la elección: un documento por persona, con su última posición
+export async function guardarUbicacion({ lat, lng, prec }) {
+  return sinTrabar(setDoc(D('ubicaciones', me.uid), {
+    uid: me.uid, nombre: me.nombre, rol: me.rol, path: me.path,
+    lat, lng, prec: Math.round(prec || 0), at: Date.now(), activo: true
+  }));
+}
+export async function dejarUbicacion() {
+  return sinTrabar(setDoc(D('ubicaciones', me.uid), { activo: false, at: Date.now() }, { merge: true }));
+}
+export function watchUbicaciones(cb) {
+  return onSnapshot(deMiEquipo('ubicaciones'), (s) => cb(s.docs.map((d) => d.data())), (e) => console.error(e));
+}
+
 // ----- contraseñas
 export async function cambiarClave(actual, nueva) {
   const u = auth.currentUser;

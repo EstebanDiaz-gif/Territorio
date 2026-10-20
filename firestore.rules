@@ -136,6 +136,13 @@ service cloud.firestore {
         );
       }
 
+      // ---------- Ubicación del día de la elección: cada uno publica la suya; la ven sus superiores ----------
+      match /ubicaciones/{uid} {
+        allow read: if gestor() && (esCabeza() || enMiEquipo(resource.data.path));
+        allow create, update: if miembro() && request.auth.uid == uid && request.resource.data.path == yo().path;
+        allow delete: if request.auth != null && request.auth.uid == uid;
+      }
+
       // ---------- Fiscalización: un documento por fiscal (id = uid del fiscal) ----------
       function rutaFiscal(fid) { return usuario(fid).path; }
       match /fiscalias/{fid} {

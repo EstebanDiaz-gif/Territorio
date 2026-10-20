@@ -12,6 +12,15 @@ const subs = new Set();
 function cargar() {
   try { db = JSON.parse(localStorage.getItem(KEY)); } catch { db = null; }
   if (!db || !db.usuarios) db = semilla();
+  db.ubicaciones ||= semillaUbicaciones();
+}
+// Posiciones de prueba en San Miguel de Tucumán (minutos atrás, para que siempre se vean "recientes")
+function semillaUbicaciones() {
+  const u = (uid, lat, lng, haceMin) => [uid, { uid, lat, lng, prec: 12, haceMin, activo: true }];
+  return Object.fromEntries([
+    u('mov2', -26.8187, -65.2072, 2), u('mov3', -26.8302, -65.2141, 6), u('mov4', -26.8115, -65.2310, 24),
+    u('dir2', -26.8241, -65.2206, 1), u('dir3', -26.8059, -65.2178, 48)
+  ]);
 }
 function guardar() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { /* sin almacenamiento */ }
@@ -275,6 +284,22 @@ export async function listarPersonas(filtros = [], lim = 0) { await espera(60); 
 // ---------- Fiscalización ----------
 export async function leerListas() { return { listas: db.campania.listas || [], categorias: db.campania.categorias || [] }; }
 export async function guardarListas(listas, categorias) { Object.assign(db.campania, { listas, categorias }); if (me) Object.assign(me, { listas, categorias }); guardar(); }
+export async function guardarUbicacion({ lat, lng, prec }) {
+  db.ubicaciones[me.uid] = { uid: me.uid, lat, lng, prec: Math.round(prec || 0), at: Date.now(), activo: true };
+  guardar(); return { ok: true };
+}
+export async function dejarUbicacion() {
+  if (db.ubicaciones[me.uid]) { db.ubicaciones[me.uid].activo = false; guardar(); }
+  return { ok: true };
+}
+export function watchUbicaciones(cb) {
+  const f = () => cb(Object.values(db.ubicaciones || {}).map((x) => {
+    const u = db.usuarios[x.uid];
+    return u ? { ...x, nombre: u.nombre, rol: u.rol, path: u.path, at: x.at || Date.now() - (x.haceMin || 0) * 60000 } : null;
+  }).filter((x) => x && (me.rol === 'cabeza' || x.path.includes(me.uid))));
+  subs.add(f); f();
+  return () => subs.delete(f);
+}
 export function watchFiscalias(cb) {
   const f = () => cb(Object.values(db.fiscalias || {}).filter((x) => me.rol === 'cabeza' || x.path.includes(me.uid)));
   subs.add(f); f();
