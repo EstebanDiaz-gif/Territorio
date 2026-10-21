@@ -116,7 +116,9 @@ export async function sembrar(log) {
 
   const U = {}; // k -> usuario
   U.cab = { uid: uidCab, dni: cab.dni, nombre: cab.nombre, rol: 'cabeza', parentId: null, path: [uidCab], circuito: '', tel: '', domicilio: 'Av. Mate de Luna 1500' };
-  if (!(await getDoc(D('usuarios', uidCab))).exists()) await setDoc(D('usuarios', uidCab), { ...U.cab, creado: serverTimestamp() });
+  // Si la cabeza todavía no está en la campaña, las reglas no la dejan leer su propio usuario: se toma como "no existe"
+  const yaEsta = await getDoc(D('usuarios', uidCab)).then((x) => x.exists()).catch(() => false);
+  if (!yaEsta) await setDoc(D('usuarios', uidCab), { ...U.cab, creado: serverTimestamp() });
 
   // listas, categorías y alertas
   const listas = LISTAS.map((nm) => ({ id: idLista(nm), nombre: nm }));
