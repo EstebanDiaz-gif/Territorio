@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Territorio · Crear demo</title>
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<style>
+  :root { --tinta: #14213D; --verde: #0E8A57; --papel: #F3F4EF; --linea: #DDE3EA; --gris: #5A6575; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; background: var(--papel); color: var(--tinta); }
+  header { background: var(--tinta); color: #fff; padding: 20px 16px; display: flex; gap: 12px; align-items: center; }
+  header b { font-size: 22px; letter-spacing: 2px; }
+  main { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  .card { background: #fff; border: 1px solid var(--linea); border-radius: 14px; padding: 16px; }
+  button { font: inherit; font-weight: 700; border: 0; border-radius: 12px; min-height: 48px; padding: 0 18px; background: var(--verde); color: #fff; width: 100%; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  input { font: inherit; width: 100%; min-height: 46px; border: 1px solid var(--linea); border-radius: 12px; padding: 0 12px; }
+  #log { font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; color: var(--gris); max-height: 240px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--linea); }
+  .muted { color: var(--gris); font-size: 14px; }
+  .ok { color: var(--verde); font-weight: 700; }
+  .bad { color: #A0261A; font-weight: 700; }
+</style>
+</head>
+<body>
+<header>
+  <svg width="34" height="34" viewBox="0 0 48 48" aria-hidden="true"><rect x="0" y="0" width="14" height="14" rx="3" fill="#fff"/><rect x="17" y="0" width="14" height="14" rx="3" fill="#fff"/><rect x="34" y="0" width="14" height="14" rx="3" fill="#fff"/><rect x="0" y="17" width="14" height="14" rx="3" fill="#fff" fill-opacity=".18"/><rect x="17" y="17" width="14" height="14" rx="3" fill="#fff"/><rect x="34" y="17" width="14" height="14" rx="3" fill="#fff" fill-opacity=".18"/><rect x="0" y="34" width="14" height="14" rx="3" fill="#fff" fill-opacity=".18"/><rect x="17" y="34" width="14" height="14" rx="3" fill="#7FE0B4"/><rect x="34" y="34" width="14" height="14" rx="3" fill="#fff" fill-opacity=".18"/></svg>
+  <div><b>TERRITORIO</b><div style="opacity:.8;font-size:14px">Crear campaña de demostración</div></div>
+</header>
+<main>
+  <div class="card">
+    <p style="margin-top:0">Crea en Firebase una campaña <b>de prueba</b> con todo inventado: equipo completo, padrón, gente cargada, votos, fiscales con actas, partidos, un reclamo y ubicaciones. Tarda 1 o 2 minutos.</p>
+    <p class="muted">No cierra tu sesión de la app. Si ya la creaste antes, la completa sin duplicar.</p>
+    <label for="ok" class="muted">Escribí DEMO para confirmar</label>
+    <input id="ok" autocomplete="off">
+    <div style="height:10px"></div>
+    <button id="btn">Crear la demo</button>
+  </div>
+  <div class="card" id="estado" hidden><div id="log"></div></div>
+  <div class="card" id="accesos"></div>
+</main>
+<script type="module">
+  import { sembrar, EQUIPO, CLAVE } from './js/sembrar-demo.js';
+  const ROL = { cabeza: 'Cabeza', encargado: 'Encargado/a', dirigente: 'Dirigente', movilizador: 'Movilizador/a', fiscal: 'Fiscal' };
+  const fmt = (d) => d.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  document.getElementById('accesos').innerHTML = `<b>Accesos de la demo</b> <span class="muted">· contraseña de todos: <b>${CLAVE}</b></span>
+    <table><tr><th>Rol</th><th>Nombre</th><th>DNI</th></tr>${EQUIPO.map((u) => `<tr><td>${ROL[u.rol]}</td><td>${u.nombre}${u.circuito ? ' <span class="muted">· circ. ' + u.circuito + '</span>' : ''}</td><td>${u.dni}</td></tr>`).join('')}</table>`;
+  const log = (t) => { const el = document.getElementById('log'); el.textContent += t + '\n'; el.scrollTop = el.scrollHeight; };
+  document.getElementById('btn').addEventListener('click', async (e) => {
+    if (document.getElementById('ok').value.trim().toUpperCase() !== 'DEMO') { document.getElementById('ok').focus(); return; }
+    e.target.disabled = true; e.target.textContent = 'Creando…';
+    document.getElementById('estado').hidden = false;
+    try {
+      const r = await sembrar(log);
+      log(`\n✔ ${r.personas} personas cargadas, ${r.votaron} ya votaron, padrón de ${r.padron} electores.`);
+      document.getElementById('log').insertAdjacentHTML('beforeend', '<div class="ok">Listo. Entrá a la app con cualquiera de los DNI de abajo.</div>');
+      e.target.textContent = 'Demo creada';
+    } catch (err) {
+      console.error(err);
+      log('\n✖ Error: ' + (err.code || '') + ' ' + err.message);
+      document.getElementById('log').insertAdjacentHTML('beforeend', '<div class="bad">Se cortó. Mandale una captura de esto a soporte. Podés volver a tocar el botón: sigue desde donde quedó.</div>');
+      e.target.disabled = false; e.target.textContent = 'Reintentar';
+    }
+  });
+</script>
+</body>
+</html>
