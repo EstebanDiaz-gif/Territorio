@@ -736,10 +736,13 @@ function pintarDiaCabeza(el) {
 // ---------------------------------------------------------------- VIDEO DE CONSTANCIA DE VOTO
 // Un video corto de la persona con su constancia de voto en la escuela. Lo sube el movilizador (de la galería,
 // si se lo mandaron por WhatsApp) o la misma persona con un link/QR personal. Al subirlo queda marcado que votó.
-const videoExigido = () => !!st.me?.videoVoto;
+// Módulo que se habilita por campaña (campo modulos.video en la campaña, lo prende solo el administrador desde Firebase)
+const moduloVideo = () => !!st.me?.modulos?.video;
+const videoExigido = () => moduloVideo() && !!st.me?.videoVoto;
 const TERMINOS_VIDEO = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'terminos-video.html';
 const vv = { archivo: null, dni: null };
 function htmlVideoVoto(p) {
+  if (!moduloVideo()) return '';
   const mb = (n) => (n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1).replace('.', ',') + ' MB');
   if (p.video) return `<div class="card pad stack" id="vv">
     <div class="row"><span style="color:var(--accent)">${ic('video', 24)}</span><div class="grow"><b>Video de constancia ✓</b>
@@ -1238,7 +1241,7 @@ function vistaPanel() {
         <textarea id="cats-txt" class="input" rows="3" placeholder="Gobernador&#10;Legisladores&#10;Concejales">${esc((st.me.categorias || []).map((l) => l.nombre).join('\n'))}</textarea>
         <div class="muted small" style="margin-top:4px">Si la elección tiene una sola categoría, dejalo vacío.</div></div>
         <button class="btn" data-act="listas-guardar">Guardar</button>`) : ''}
-      ${st.me.rol === 'cabeza' ? herr('video', 'video', 'Video de constancia de voto', 'Pedir un video para marcar que votó', `
+      ${st.me.rol === 'cabeza' && moduloVideo() ? herr('video', 'video', 'Video de constancia de voto', 'Pedir un video para marcar que votó', `
         <div class="muted">Cada persona puede tener un video corto con su constancia de voto en la escuela. Lo sube el movilizador o la persona con su link o QR. Al subirse, queda marcado que votó.</div>
         <div class="row"><span class="grow">¿Exigir el video para marcar “Ya votó”?</span>
           <button type="button" class="chip" data-act="vv-exigir" aria-pressed="${videoExigido()}">${videoExigido() ? 'Sí, se exige video' : 'No se exige'}</button></div>

@@ -136,7 +136,8 @@ service cloud.firestore {
         allow create: if gestor()
           && request.resource.data.path == get(ruta('/personas/' + request.resource.data.dni)).data.path
           && (esCabeza() || enMiEquipo(request.resource.data.path))
-          && request.resource.data.expira is timestamp;
+          && request.resource.data.expira is timestamp
+          && get(ruta('')).data.modulos.video == true;
         allow delete: if gestor();
       }
 

@@ -41,7 +41,7 @@ export async function init() {
 // En la demo, si no se configuraron alertas, se muestran unas de ejemplo con la fecha de hoy
 const hoyDemo = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const alertasDemo = () => ({ fecha: hoyDemo(), minimo: 5, pasos: [{ hora: '08:00', pct: 40, niveles: 1 }, { hora: '12:00', pct: 50, niveles: 2 }, { hora: '15:00', pct: 60, niveles: 99 }] });
-const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [], alertas: db.campania.alertas || alertasDemo(), videoVoto: !!db.campania.videoVoto });
+const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [], alertas: db.campania.alertas || alertasDemo(), videoVoto: !!db.campania.videoVoto, modulos: { video: true } });
 
 export async function login(dni, pass) {
   await espera();

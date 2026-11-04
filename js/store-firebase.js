@@ -60,7 +60,7 @@ async function cargarMe(uid) {
   if (!activo) throw Object.assign(new Error('Tu usuario fue dado de baja de la campaña. Pedile a quien te suma que te vuelva a agregar.'), { code: 'sin-campania' });
   const u = await getDoc(D('usuarios', uid));
   const camp = await getDoc(doc(db, 'campanias', cid));
-  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [], alertas: camp.data()?.alertas || null, videoVoto: !!camp.data()?.videoVoto };
+  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [], alertas: camp.data()?.alertas || null, videoVoto: !!camp.data()?.videoVoto, modulos: camp.data()?.modulos || {} };
   return me;
 }
 
