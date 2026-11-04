@@ -49,7 +49,7 @@ service cloud.firestore {
 
       allow read: if miembro();
       allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias', 'alertas']);
+      allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias', 'alertas', 'videoVoto']);
 
       // ---------- Usuarios ----------
       match /usuarios/{uid} {
@@ -114,13 +114,30 @@ service cloud.firestore {
 
         allow update: if gestor() && (esCabeza() || enMiEquipo(resource.data.path)) && (
           // cambios comunes
-          soloCambia(['estado', 'tel', 'domicilio', 'voto', 'votoAt', 'nota', 'tipo', 'revisar', 'actualizadoAt'])
+          soloCambia(['estado', 'tel', 'domicilio', 'voto', 'votoAt', 'nota', 'tipo', 'revisar', 'actualizadoAt', 'video', 'conVideo'])
           // transferencia a otro dueño dentro de mi equipo (las cabezas, a cualquiera)
           || (soloCambia(['ownerId', 'ownerNombre', 'path', 'actualizadoAt'])
             && request.resource.data.path == usuario(request.resource.data.ownerId).path
             && (esCabeza() || enMiEquipo(request.resource.data.path)))
         );
+        // El votante, con su link personal (sin usuario), solo puede marcar que votó adjuntando su video
+        allow update: if request.resource.data.video.token is string
+          && exists(ruta('/tokensVideo/' + request.resource.data.video.token))
+          && get(ruta('/tokensVideo/' + request.resource.data.video.token)).data.dni == dni
+          && get(ruta('/tokensVideo/' + request.resource.data.video.token)).data.expira > request.time
+          && request.resource.data.voto == true
+          && soloCambia(['video', 'conVideo', 'voto', 'votoAt']);
         allow delete: if gestor() && (esCabeza() || enMiEquipo(resource.data.path));
+      }
+
+      // ---------- Links personales para subir el video de constancia ----------
+      match /tokensVideo/{t} {
+        allow get: if true;
+        allow create: if gestor()
+          && request.resource.data.path == get(ruta('/personas/' + request.resource.data.dni)).data.path
+          && (esCabeza() || enMiEquipo(request.resource.data.path))
+          && request.resource.data.expira is timestamp;
+        allow delete: if gestor();
       }
 
       // ---------- Conflictos: intentos de cargar a alguien que ya es de otro ----------

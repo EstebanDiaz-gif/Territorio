@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#14213D">
+<title>Video de constancia de voto</title>
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<style>
+  :root { --tinta: #14213D; --verde: #0E8A57; --papel: #F3F4EF; --linea: #DDE3EA; --gris: #4A5568; --rojo: #A0261A; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 18px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; background: var(--papel); color: var(--tinta); }
+  header { background: var(--tinta); color: #fff; padding: 18px 16px; display: flex; gap: 12px; align-items: center; }
+  main { max-width: 520px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  .card { background: #fff; border: 1px solid var(--linea); border-radius: 16px; padding: 18px; display: grid; gap: 12px; }
+  h1 { font-size: 24px; margin: 0; }
+  p { margin: 0; color: var(--gris); }
+  label.campo { font-weight: 700; font-size: 16px; }
+  input[type=text] { font: inherit; font-size: 22px; letter-spacing: 1px; width: 100%; min-height: 54px; border: 2px solid var(--linea); border-radius: 12px; padding: 0 14px; }
+  .btn { font: inherit; font-weight: 700; border: 0; border-radius: 14px; min-height: 58px; padding: 0 18px; background: var(--verde); color: #fff; width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; text-align: center; }
+  .btn.sec { background: #E3F4EC; color: #0B6447; }
+  .btn[aria-disabled=true] { opacity: .45; pointer-events: none; }
+  .check { display: flex; gap: 10px; align-items: flex-start; font-size: 17px; }
+  .check input { width: 24px; height: 24px; margin-top: 2px; accent-color: var(--verde); flex: none; }
+  .barra { height: 12px; background: #E8ECEF; border-radius: 6px; overflow: hidden; } .barra i { display: block; height: 100%; width: 0; background: var(--verde); transition: width .2s; }
+  .ok { color: var(--verde); font-weight: 700; } .bad { color: var(--rojo); font-weight: 700; }
+  .paso { display: flex; gap: 10px; align-items: flex-start; } .paso b { flex: none; width: 30px; height: 30px; border-radius: 15px; background: var(--tinta); color: #fff; display: grid; place-items: center; font-size: 16px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <svg width="30" height="30" viewBox="0 0 48 48" aria-hidden="true"><rect x="0" y="0" width="14" height="14" rx="3" fill="#fff"/><rect x="17" y="0" width="14" height="14" rx="3" fill="#fff"/><rect x="34" y="0" width="14" height="14" rx="3" fill="#fff"/><rect x="0" y="17" width="14" height="14" rx="3" fill="#fff" fill-opacity=".18"/><rect x="17" y="17" width="14" height="14" rx="3" fill="#fff"/><rect x="34" y="17" width="14" height="14" rx="3" fill="#fff" fill-opacity=".18"/><rect x="0" y="34" width="14" height="14" rx="3" fill="#fff" fill-opacity=".18"/><rect x="17" y="34" width="14" height="14" rx="3" fill="#7FE0B4"/><rect x="34" y="34" width="14" height="14" rx="3" fill="#fff" fill-opacity=".18"/></svg>
+  <b>Video de constancia de voto</b>
+</header>
+<main>
+  <div class="card" id="cargando"><p>Cargando…</p></div>
+
+  <div class="card" id="invalido" hidden>
+    <h1>Este link ya no sirve</h1>
+    <p>Venció o no es correcto. Pedile uno nuevo a la persona que te lo mandó.</p>
+  </div>
+
+  <div id="form" hidden style="display:grid;gap:14px">
+    <div class="card">
+      <h1 id="saludo">¡Hola!</h1>
+      <p>Cuando vayas a votar, grabá un video cortito <b>tuyo con la constancia de voto</b> en la puerta de la escuela.</p>
+      <div class="paso"><b>1</b><p>Escribí tu DNI.</p></div>
+      <div class="paso"><b>2</b><p>Aceptá los términos.</p></div>
+      <div class="paso"><b>3</b><p>Grabá o elegí el video y listo.</p></div>
+    </div>
+    <div class="card">
+      <label class="campo" for="dni">Tu DNI</label>
+      <input id="dni" type="text" inputmode="numeric" autocomplete="off" placeholder="Sin puntos">
+      <div id="dni-err" class="bad" hidden>Ese DNI no coincide con el de este link.</div>
+      <label class="check"><input type="checkbox" id="acepto"> <span>Leí y acepto los <a id="terminos" href="terminos-video.html" target="_blank" rel="noopener">términos del video</a>. Es voluntario y el voto es secreto: no filmo la boleta.</span></label>
+    </div>
+    <div class="card" id="elegir">
+      <label class="btn" id="b-grabar" for="f-grabar" aria-disabled="true">🎥 Grabar video ahora</label>
+      <label class="btn sec" id="b-galeria" for="f-galeria" aria-disabled="true">Elegir un video del celular</label>
+      <input id="f-grabar" type="file" accept="video/*" capture="user" hidden>
+      <input id="f-galeria" type="file" accept="video/*" hidden>
+      <p style="font-size:15px">Hasta 1 minuto. Si tenés poca señal, esperá a que termine de subir.</p>
+    </div>
+    <div class="card" id="subiendo" hidden>
+      <p id="sub-txt">Subiendo tu video…</p>
+      <div class="barra"><i id="sub-bar"></i></div>
+    </div>
+    <div class="card" id="listo" hidden>
+      <h1 class="ok">¡Listo, gracias!</h1>
+      <p>Tu video se subió bien. Ya podés cerrar esta página.</p>
+    </div>
+    <div class="card" id="error" hidden>
+      <p class="bad" id="err-txt">No se pudo subir el video.</p>
+      <button class="btn" id="b-reintentar" type="button">Reintentar</button>
+    </div>
+  </div>
+</main>
+<script type="module" src="js/video-votante.js"></script>
+</body>
+</html>

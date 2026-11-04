@@ -9,7 +9,7 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore,
   doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where, onSnapshot,
-  writeBatch, serverTimestamp, getCountFromServer, getDocs, arrayUnion, limit
+  writeBatch, serverTimestamp, getCountFromServer, getDocs, arrayUnion, limit, deleteField, Timestamp
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 export const modo = 'firebase';
@@ -60,7 +60,7 @@ async function cargarMe(uid) {
   if (!activo) throw Object.assign(new Error('Tu usuario fue dado de baja de la campaña. Pedile a quien te suma que te vuelva a agregar.'), { code: 'sin-campania' });
   const u = await getDoc(D('usuarios', uid));
   const camp = await getDoc(doc(db, 'campanias', cid));
-  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [], alertas: camp.data()?.alertas || null };
+  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [], alertas: camp.data()?.alertas || null, videoVoto: !!camp.data()?.videoVoto };
   return me;
 }
 
@@ -364,6 +364,57 @@ export async function contarPersonas() {
 export async function leerListas() {
   const c = await getDoc(doc(db, 'campanias', cid));
   return { listas: c.data()?.listas || [], categorias: c.data()?.categorias || [] };
+}
+// ----- video de constancia de voto (Firebase Storage, plan Blaze)
+let modStorage = null;
+async function almacen() {
+  modStorage ||= await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js');
+  return { m: modStorage, s: modStorage.getStorage(app) };
+}
+export async function subirVideoVoto(dni, archivo, onProgreso) {
+  const { m, s } = await almacen();
+  const ext = ((archivo.name || '').split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'mp4';
+  const path = `campanias/${cid}/videos/${dni}/voto.${ext}`;
+  const tarea = m.uploadBytesResumable(m.ref(s, path), archivo, { contentType: archivo.type || 'video/mp4' });
+  await new Promise((res, rej) => tarea.on('state_changed', (x) => onProgreso?.(x.bytesTransferred, x.totalBytes), rej, res));
+  const ahora = Date.now();
+  await updateDoc(D('personas', dni), { video: { path, tam: archivo.size, at: ahora, por: me.uid }, conVideo: true, voto: true, votoAt: ahora, actualizadoAt: serverTimestamp() });
+}
+export async function urlVideoVoto(p) {
+  const { m, s } = await almacen();
+  return m.getDownloadURL(m.ref(s, p.video.path));
+}
+export async function borrarVideoVoto(p) {
+  const { m, s } = await almacen();
+  try { await m.deleteObject(m.ref(s, p.video.path)); } catch (e) { if (e.code !== 'storage/object-not-found') throw e; }
+  await updateDoc(D('personas', p.dni), { video: deleteField(), conVideo: false, actualizadoAt: serverTimestamp() });
+}
+// Link personal para que el votante suba su video sin tener usuario (vence a los 3 días)
+const tokenNuevo = () => Array.from(crypto.getRandomValues(new Uint8Array(18)), (b) => 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 56]).join('');
+export async function crearLinkVideo(p) {
+  const t = tokenNuevo();
+  await setDoc(D('tokensVideo', t), {
+    dni: p.dni, nombre: String(p.nombre || ''), path: p.path, creadoPor: me.uid,
+    expira: Timestamp.fromMillis(Date.now() + 3 * 864e5), creado: serverTimestamp()
+  });
+  return { cid, token: t };
+}
+export async function leerLinkVideo(c, t) {
+  const s = await getDoc(doc(db, 'campanias', c, 'tokensVideo', t));
+  if (!s.exists()) return null;
+  const d = s.data();
+  return { dni: d.dni, nombre: d.nombre, vence: d.expira.toMillis() };
+}
+export async function subirVideoConLink(c, t, dni, archivo, onProgreso) {
+  const { m, s } = await almacen();
+  const path = `campanias/${c}/videos/${dni}/t_${t}`;
+  const tarea = m.uploadBytesResumable(m.ref(s, path), archivo, { contentType: archivo.type || 'video/mp4' });
+  await new Promise((res, rej) => tarea.on('state_changed', (x) => onProgreso?.(x.bytesTransferred, x.totalBytes), rej, res));
+  const ahora = Date.now();
+  await updateDoc(doc(db, 'campanias', c, 'personas', dni), { video: { path, tam: archivo.size, at: ahora, token: t, por: 'votante' }, conVideo: true, voto: true, votoAt: ahora });
+}
+export function guardarVideoObligatorio(v) {
+  return sinTrabar(updateDoc(doc(db, 'campanias', cid), { videoVoto: !!v }));
 }
 export function guardarAlertas(alertas) {
   return sinTrabar(updateDoc(doc(db, 'campanias', cid), { alertas }));

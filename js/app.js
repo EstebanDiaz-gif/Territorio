@@ -171,6 +171,8 @@ const I = {
   mas: '<path d="M12 5v14M5 12h14"/>',
   subir: '<path d="M12 15V3M7 8l5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
   bajar: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
+  video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/>',
+  qr: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 20h2M20 14v2"/>',
   casa: '<path d="M3.5 11.5L12 4l8.5 7.5"/><path d="M5.5 10v9.5h13V10"/><path d="M10 19.5v-5h4v5"/>',
   auto: '<path d="M3 16v-5l2-5h11l3 5h2v5h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/>',
   camara: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="4"/>',
@@ -422,6 +424,7 @@ function tarjetaPersona(p) {
   if (p.voto) tags.push('<span class="pill p-ok">Votó</span>');
   if (p.tipo && p.tipo !== 'votante') tags.push(`<span class="pill p-acc">${esc(TIPO_LABEL[p.tipo])}</span>`);
   if (p.revisar) tags.push('<span class="pill p-warn">Revisar</span>');
+  if (p.video) tags.push('<span class="pill p-ok">Video ✓</span>');
   const mio = p.ownerId === st.me.uid;
   const wa = waUrl(p.tel, textoRecordatorio(p));
   return `<div class="row">
@@ -497,7 +500,8 @@ function hojaPersona(dni, confirmarBorrado = false) {
       <select id="p-tipo" class="input">${TIPOS.map(([k, l]) => `<option value="${k}" ${p.tipo === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
     </div>
     <div><label class="label" for="p-nota">Nota</label><textarea id="p-nota" class="input" rows="2" placeholder="Ej: lo busca Diego a las 10">${esc(p.revisar ? '' : p.nota)}</textarea></div>
-    <button type="button" class="btn btn-full ${p.voto ? 'btn-ok' : ''}" data-act="p-voto">${p.voto ? ic('ok') + ' Ya votó · tocar para deshacer' : 'Marcar que ya votó'}</button>
+    ${htmlVideoVoto(p)}
+    ${videoExigido() && !p.voto && st.me.rol !== 'cabeza' ? '' : `<button type="button" class="btn btn-full ${p.voto ? 'btn-ok' : ''}" data-act="p-voto">${p.voto ? ic('ok') + ' Ya votó · tocar para deshacer' : (videoExigido() ? 'Marcar que votó sin video (solo cabeza)' : 'Marcar que ya votó')}</button>`}
     <div class="muted">Es de <b>${esc(p.ownerNombre)}</b>${p.ownerId === st.me.uid ? ' (vos)' : ''}</div>
     ${p.tipo && p.tipo !== 'votante' ? (st.usuarios.some((u) => u.dni === p.dni)
       ? `<div class="aviso ok">${ic('ok', 18)}<span>Ya tiene acceso a la app como fiscal.</span></div>`
@@ -695,7 +699,7 @@ function pintarDia() {
           <div class="grow"><div style="font-weight:600">${esc(p.nombre)}</div>
           <div class="muted small num">Mesa ${esc(p.mesa || '–')} · orden ${esc(p.orden || '–')}${p.ownerId !== st.me.uid ? ' · de ' + esc(p.ownerNombre) : ''}</div></div>
           ${!p.voto && casaUrl(p.domicilio) ? `<a class="icon-btn" href="${casaUrl(p.domicilio)}" target="_blank" rel="noopener" aria-label="Ir a la casa de ${esc(p.nombre)}">${ic('casa')}</a>` : ''}
-          <button class="btn-voto ${p.voto ? 'si' : ''}" data-act="voto" data-dni="${p.dni}" aria-pressed="${!!p.voto}">${p.voto ? '✓ Votó' : 'Ya votó'}</button>
+          <button class="btn-voto ${p.voto ? 'si' : ''}" data-act="voto" data-dni="${p.dni}" aria-pressed="${!!p.voto}">${p.voto ? (p.video ? '✓ Votó 🎥' : '✓ Votó') : 'Ya votó'}</button>
         </div>`).join('')}
       </div>`;
     }).join('')}`;
@@ -727,6 +731,97 @@ function pintarDiaCabeza(el) {
     ${htmlUbicacionesEquipo()}
     ${htmlTraslados(st.personas.filter((p) => p.estado === 'traslado' && !p.voto), s.trasPend)}
     ${bloqueCircuitos({})}`;
+}
+
+// ---------------------------------------------------------------- VIDEO DE CONSTANCIA DE VOTO
+// Un video corto de la persona con su constancia de voto en la escuela. Lo sube el movilizador (de la galería,
+// si se lo mandaron por WhatsApp) o la misma persona con un link/QR personal. Al subirlo queda marcado que votó.
+const videoExigido = () => !!st.me?.videoVoto;
+const TERMINOS_VIDEO = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'terminos-video.html';
+const vv = { archivo: null, dni: null };
+function htmlVideoVoto(p) {
+  const mb = (n) => (n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1).replace('.', ',') + ' MB');
+  if (p.video) return `<div class="card pad stack" id="vv">
+    <div class="row"><span style="color:var(--accent)">${ic('video', 24)}</span><div class="grow"><b>Video de constancia ✓</b>
+      <div class="muted small">Subido a las ${horaCorta(p.video.at)}${p.video.por === 'votante' ? ' por la persona' : ''} · ${mb(p.video.tam || 0)}</div></div></div>
+    <div class="row"><button type="button" class="btn btn-sec grow" data-act="vv-ver">Ver video</button>
+      <label class="btn btn-ghost" for="vv-file">Reemplazar</label></div>
+    <div id="vv-player"></div>
+    <input id="vv-file" type="file" accept="video/*" hidden>
+    <div id="vv-res" class="stack"></div></div>`;
+  return `<div class="card pad stack" id="vv">
+    <div class="row"><span style="color:var(--accent)">${ic('video', 24)}</span><div class="grow"><b>Video de constancia de voto</b>
+      <div class="muted small">Un video corto de la persona con su constancia de voto en la escuela (hasta 1 minuto).${videoExigido() ? ' Es necesario para marcar que votó.' : ''}</div></div></div>
+    <label class="check"><input type="checkbox" id="vv-ok"> La persona aceptó los <a href="${TERMINOS_VIDEO()}" target="_blank" rel="noopener">términos del video</a>.</label>
+    <div class="row wrap">
+      <label class="btn grow" for="vv-file" id="vv-subir">${ic('video', 18)} Subir video</label>
+      <button type="button" class="btn btn-sec grow" data-act="vv-link">${ic('qr', 18)} Mandarle link / QR</button>
+    </div>
+    <div class="muted small">Si te lo mandó por WhatsApp, guardalo y elegilo de la galería.</div>
+    <input id="vv-file" type="file" accept="video/*" hidden>
+    <div id="vv-res" class="stack"></div></div>`;
+}
+function duracionVideo(archivo) {
+  return new Promise((res) => {
+    const v = document.createElement('video'); v.preload = 'metadata';
+    const url = URL.createObjectURL(archivo);
+    const fin = (d) => { URL.revokeObjectURL(url); res(d); };
+    v.onloadedmetadata = () => fin(v.duration); v.onerror = () => fin(null);
+    setTimeout(() => fin(null), 6000);
+    v.src = url;
+  });
+}
+async function subirVideoUI(archivo) {
+  const dni = sheetCtx?.dni; const res = $('#vv-res');
+  if (!dni || !res) return;
+  const p = personaLocal(dni);
+  if (!p.video && !$('#vv-ok')?.checked) { res.innerHTML = '<div class="error">Marcá que la persona aceptó los términos del video.</div>'; $('#vv-file').value = ''; return; }
+  if (!/^video\//.test(archivo.type || '')) { res.innerHTML = '<div class="error">Ese archivo no es un video.</div>'; return; }
+  if (archivo.size > 60 * 1048576) { res.innerHTML = '<div class="error">El video pesa demasiado (más de 60 MB). Mandalo por WhatsApp para que se comprima y subilo desde ahí.</div>'; return; }
+  const d = await duracionVideo(archivo);
+  if (d && d > 75) { res.innerHTML = '<div class="error">El video dura más de un minuto. Pedile uno más corto.</div>'; return; }
+  vv.archivo = archivo; vv.dni = dni;
+  res.innerHTML = '<div class="muted small" id="vv-txt">Subiendo video…</div><div class="progreso"><i id="vv-prog"></i></div>';
+  try {
+    await S.subirVideoVoto(dni, archivo, (h, t) => { const b = $('#vv-prog'); if (b) b.style.width = pct(h, t) + '%'; const x = $('#vv-txt'); if (x) x.textContent = `Subiendo video… ${pct(h, t)}%`; });
+    Object.assign(p, { voto: true, votoAt: Date.now(), conVideo: true, video: { path: '', tam: archivo.size, at: Date.now(), por: st.me.uid } });
+    vv.archivo = null; invalidarConteos(); programarRefresco();
+    toast(`Video subido · ${primerNombre(p.nombre)} quedó como que votó`);
+    hojaPersona(dni);
+  } catch (e) {
+    console.error(e);
+    const r = $('#vv-res');
+    if (r) r.innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>No se pudo subir${/network|unavailable|retry/i.test(e.code || e.message || '') ? ': no hay buena señal' : ''}. ${esc(e.code === 'storage/unauthorized' ? 'No tenés permiso o falta activar el almacenamiento de videos.' : '')}</span></div>
+      <button type="button" class="btn btn-sec" data-act="vv-reintentar">Reintentar</button>`;
+  }
+}
+async function hojaLinkVideo(dni) {
+  const p = personaLocal(dni); if (!p) return;
+  abrirHoja(`<div class="row"><h2 class="grow">Link para ${esc(primerNombre(p.nombre))}</h2><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    <div id="lv-cuerpo" class="stack"><div class="muted">Generando el link…</div></div>`, { tipo: 'link', dni });
+  try {
+    const { cid, token } = await S.crearLinkVideo(p);
+    const link = location.origin + location.pathname.replace(/[^/]*$/, '') + `video.html?c=${encodeURIComponent(cid)}&t=${encodeURIComponent(token)}`;
+    const msg = `Hola ${primerNombre(p.nombre)}! Cuando vayas a votar, sacate un video cortito con tu constancia de voto en la escuela y subilo acá: ${link}\nEs voluntario. Términos: ${TERMINOS_VIDEO()}`;
+    const wa = waUrl(p.tel, msg);
+    const el = $('#lv-cuerpo'); if (!el) return;
+    el.innerHTML = `<div class="muted">Que lo escanee con la cámara del celular, o mandale el link. Es personal, sirve solo para esta persona y vence en 3 días.</div>
+      <div id="lv-qr" style="background:#fff;padding:16px;border-radius:16px;align-self:center;width:272px;height:272px;display:grid;place-items:center"><div class="muted small">Cargando QR…</div></div>
+      <div class="card pad small" style="word-break:break-all">${esc(link)}</div>
+      ${wa ? `<a class="btn btn-full" href="${wa}" target="_blank" rel="noopener">${ic('wa')} Mandar por WhatsApp</a>` : `<a class="btn btn-full" href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">${ic('wa')} Mandar por WhatsApp</a>`}
+      <button class="btn btn-sec" data-act="copiar" data-txt="${esc(msg)}">Copiar mensaje</button>`;
+    pintarQR($('#lv-qr'), link);
+  } catch (e) { const el = $('#lv-cuerpo'); if (el) el.innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>${esc(mensajeError(e))}</span></div>`; }
+}
+// El QR se dibuja con una librería chica que se carga solo cuando hace falta
+let libQR = null;
+async function pintarQR(el, texto) {
+  try {
+    libQR ||= new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; sc.onload = () => res(window.QRCode); sc.onerror = rej; document.head.appendChild(sc); });
+    const QR = await libQR;
+    el.innerHTML = '';
+    new QR(el, { text: texto, width: 240, height: 240, colorDark: '#14213D', colorLight: '#ffffff', correctLevel: QR.CorrectLevel.M });
+  } catch { libQR = null; el.innerHTML = '<div class="muted small" style="text-align:center">No se pudo dibujar el QR sin conexión. Mandale el link.</div>'; }
 }
 
 // ---------------------------------------------------------------- ALERTAS DEL DÍA E
@@ -1143,6 +1238,13 @@ function vistaPanel() {
         <textarea id="cats-txt" class="input" rows="3" placeholder="Gobernador&#10;Legisladores&#10;Concejales">${esc((st.me.categorias || []).map((l) => l.nombre).join('\n'))}</textarea>
         <div class="muted small" style="margin-top:4px">Si la elección tiene una sola categoría, dejalo vacío.</div></div>
         <button class="btn" data-act="listas-guardar">Guardar</button>`) : ''}
+      ${st.me.rol === 'cabeza' ? herr('video', 'video', 'Video de constancia de voto', 'Pedir un video para marcar que votó', `
+        <div class="muted">Cada persona puede tener un video corto con su constancia de voto en la escuela. Lo sube el movilizador o la persona con su link o QR. Al subirse, queda marcado que votó.</div>
+        <div class="row"><span class="grow">¿Exigir el video para marcar “Ya votó”?</span>
+          <button type="button" class="chip" data-act="vv-exigir" aria-pressed="${videoExigido()}">${videoExigido() ? 'Sí, se exige video' : 'No se exige'}</button></div>
+        <a class="btn btn-ghost" href="${TERMINOS_VIDEO()}" target="_blank" rel="noopener">Ver los términos del video</a>
+        <div class="muted small">Después de la elección, borrá los videos. Así lo dicen los términos.</div>
+        <button type="button" class="btn btn-bad" data-act="vv-borrar-todos">Borrar todos los videos</button>`) : ''}
       ${st.me.rol === 'cabeza' ? herr('alertas', 'alerta', 'Alertas del Día E', 'Avisar si alguien moviliza poco', htmlConfigAlertas()) : ''}
       ${herr('excel', 'bajar', 'Descargar Excel', 'Toda la gente de tu equipo', `
         <button class="btn btn-sec" data-act="exportar">${ic('bajar')} Descargar Excel</button>`)}
@@ -1866,6 +1968,7 @@ const acciones = {
   voto: async (el) => {
     const p = personaLocal(el.dataset.dni);
     if (!p) return;
+    if (!p.voto && videoExigido() && st.me.rol !== 'cabeza') { hojaPersona(p.dni); setTimeout(() => $('#vv')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50); return; }
     el.classList.toggle('si', !p.voto); el.textContent = p.voto ? 'Ya votó' : '✓ Votó';
     if (!p.voto && st.dia.solo === 'pend') await pausa(450);
     await actualizarPersonaApp(p.dni, { voto: !p.voto, votoAt: p.voto ? null : Date.now() });
@@ -1874,6 +1977,31 @@ const acciones = {
   'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol, el.dataset.padre || null),
   'eq-toggle': (el) => { const id = el.dataset.uid; if (st.abiertos.has(id)) st.abiertos.delete(id); else st.abiertos.add(id); pintarEquipo(); },
   'eq-opciones': (el) => hojaQuitarUsuario(el.dataset.uid),
+  'vv-link': () => hojaLinkVideo(sheetCtx.dni),
+  'vv-reintentar': () => { if (vv.archivo && vv.dni === sheetCtx?.dni) subirVideoUI(vv.archivo); },
+  'vv-ver': async () => {
+    const p = personaLocal(sheetCtx.dni); const box = $('#vv-player');
+    box.innerHTML = '<div class="muted small">Cargando video…</div>';
+    try {
+      const url = await S.urlVideoVoto(p);
+      box.innerHTML = url ? `<video src="${esc(url)}" controls playsinline style="width:100%;max-height:420px;border-radius:12px;background:#000"></video>` : '<div class="muted small">El video no está disponible en este dispositivo.</div>';
+    } catch (e) { box.innerHTML = `<div class="error">${esc(mensajeError(e))}</div>`; }
+  },
+  'vv-exigir': async (el) => {
+    const v = !videoExigido();
+    try { await S.guardarVideoObligatorio(v); st.me.videoVoto = v; el.textContent = v ? 'Sí, se exige video' : 'No se exige'; el.setAttribute('aria-pressed', v); toast(v ? 'Desde ahora, para marcar "Ya votó" hace falta el video' : 'Ya no se exige el video'); }
+    catch (e) { toast(mensajeError(e)); }
+  },
+  'vv-borrar-todos': async (el) => {
+    if (el.dataset.confirmar !== '1') { el.dataset.confirmar = '1'; el.textContent = 'Tocá de nuevo para borrar todos los videos'; return; }
+    el.disabled = true; el.textContent = 'Borrando…';
+    try {
+      const con = liviano() ? await S.listarPersonas([['conVideo', '==', true]]) : st.personas.filter((p) => p.video);
+      let n = 0;
+      for (const p of con) { try { await S.borrarVideoVoto(p); n++; el.textContent = `Borrando… ${n} de ${con.length}`; } catch { /* sigue */ } }
+      el.textContent = `Listo: ${n} videos borrados`; invalidarConteos(); programarRefresco();
+    } catch (e) { el.disabled = false; el.textContent = 'Borrar todos los videos'; toast(mensajeError(e)); }
+  },
   'gps-toggle': () => {
     if (gpsActivo()) { detenerGps(); gpsRecordar(false); toast('Dejaste de compartir tu ubicación'); }
     else { gps.error = ''; gpsRecordar(true); iniciarGps(); }
@@ -2104,6 +2232,7 @@ document.addEventListener('change', async (e) => {
     if (id === 'p-tipo') { await actualizarPersonaApp(dni, { tipo: e.target.value }); }
   }
   if (id === 'fx-foto' && e.target.files[0]) tomarFotoActa(e.target.files[0]);
+  if (id === 'vv-file' && e.target.files[0]) subirVideoUI(e.target.files[0]);
   if (id === 'gps-pantalla') { gps.pantalla = e.target.checked; if (gps.pantalla) pedirPantalla(); else soltarPantalla(); }
   if (id === 'imp-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'imp');
   if (id === 'fis-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'fis');

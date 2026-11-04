@@ -1,0 +1,28 @@
+rules_version = '2';
+
+// Reglas de Firebase Storage de Territorio: videos de constancia de voto.
+// Se guardan en campanias/{cid}/videos/{dni}/... y los pueden ver o subir quienes tienen a esa persona en su equipo.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /campanias/{cid}/videos/{dni}/{archivo} {
+      function usuario() { return firestore.get(/databases/(default)/documents/campanias/$(cid)/usuarios/$(request.auth.uid)).data; }
+      function miembro() { return request.auth != null && firestore.exists(/databases/(default)/documents/campanias/$(cid)/usuarios/$(request.auth.uid)); }
+      function esCabeza() { return miembro() && usuario().rol == 'cabeza'; }
+      function deMiEquipo() {
+        return esCabeza() || (miembro() && usuario().rol != 'fiscal'
+          && request.auth.uid in firestore.get(/databases/(default)/documents/campanias/$(cid)/personas/$(dni)).data.path);
+      }
+      allow read: if deMiEquipo();
+      allow create, update: if deMiEquipo()
+        && request.resource.size < 60 * 1024 * 1024
+        && request.resource.contentType.matches('video/.*');
+      allow delete: if deMiEquipo();
+      // El votante sube su propio video con el link personal (sin usuario), mientras el link no venció
+      allow create: if archivo.matches('t_[A-Za-z0-9]+')
+        && firestore.get(/databases/(default)/documents/campanias/$(cid)/tokensVideo/$(archivo.split('_')[1])).data.dni == dni
+        && firestore.get(/databases/(default)/documents/campanias/$(cid)/tokensVideo/$(archivo.split('_')[1])).data.expira > request.time
+        && request.resource.size < 60 * 1024 * 1024
+        && request.resource.contentType.matches('video/.*');
+    }
+  }
+}

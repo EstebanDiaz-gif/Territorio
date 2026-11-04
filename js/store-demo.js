@@ -41,7 +41,7 @@ export async function init() {
 // En la demo, si no se configuraron alertas, se muestran unas de ejemplo con la fecha de hoy
 const hoyDemo = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const alertasDemo = () => ({ fecha: hoyDemo(), minimo: 5, pasos: [{ hora: '08:00', pct: 40, niveles: 1 }, { hora: '12:00', pct: 50, niveles: 2 }, { hora: '15:00', pct: 60, niveles: 99 }] });
-const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [], alertas: db.campania.alertas || alertasDemo() });
+const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [], alertas: db.campania.alertas || alertasDemo(), videoVoto: !!db.campania.videoVoto });
 
 export async function login(dni, pass) {
   await espera();
@@ -286,6 +286,39 @@ export async function listarPersonas(filtros = [], lim = 0) { await espera(60); 
 
 // ---------- Fiscalización ----------
 export async function leerListas() { return { listas: db.campania.listas || [], categorias: db.campania.categorias || [] }; }
+// Video de constancia: en la demo queda solo en la memoria de este navegador
+const videosMem = new Map();
+export async function subirVideoVoto(dni, archivo, onProgreso) {
+  for (let i = 1; i <= 5; i++) { await espera(90); onProgreso?.(i, 5); }
+  videosMem.set(dni, URL.createObjectURL(archivo));
+  const ahora = Date.now();
+  Object.assign(db.personas[dni], { video: { path: 'demo', tam: archivo.size, at: ahora, por: me.uid }, conVideo: true, voto: true, votoAt: ahora });
+  guardar();
+}
+export async function urlVideoVoto(p) { return videosMem.get(p.dni) || null; }
+export async function borrarVideoVoto(p) {
+  videosMem.delete(p.dni);
+  const x = db.personas[p.dni]; if (x) { delete x.video; x.conVideo = false; guardar(); }
+}
+export async function crearLinkVideo(p) {
+  const t = Math.random().toString(36).slice(2, 12);
+  (db.tokensVideo ||= {})[t] = { dni: p.dni, nombre: p.nombre, expira: Date.now() + 3 * 864e5 };
+  guardar();
+  return { cid: 'demo', token: t };
+}
+export async function leerLinkVideo(c, t) {
+  if (!db) cargar();
+  const x = db.tokensVideo?.[t];
+  return x && x.expira > Date.now() ? { dni: x.dni, nombre: x.nombre, vence: x.expira } : null;
+}
+export async function subirVideoConLink(c, t, dni, archivo, onProgreso) {
+  if (!db) cargar();
+  for (let i = 1; i <= 5; i++) { await espera(90); onProgreso?.(i, 5); }
+  const ahora = Date.now();
+  Object.assign(db.personas[dni], { video: { path: 'demo', tam: archivo.size, at: ahora, token: t, por: 'votante' }, conVideo: true, voto: true, votoAt: ahora });
+  guardar();
+}
+export async function guardarVideoObligatorio(v) { db.campania.videoVoto = !!v; if (me) me.videoVoto = !!v; guardar(); }
 export async function guardarAlertas(alertas) { db.campania.alertas = alertas; if (me) me.alertas = alertas; guardar(); }
 export async function guardarListas(listas, categorias) { Object.assign(db.campania, { listas, categorias }); if (me) Object.assign(me, { listas, categorias }); guardar(); }
 export async function guardarUbicacion({ lat, lng, prec }) {
