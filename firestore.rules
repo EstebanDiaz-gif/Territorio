@@ -49,7 +49,7 @@ service cloud.firestore {
 
       allow read: if miembro();
       allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias', 'alertas', 'videoVoto']);
+      allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias', 'alertas', 'videoVoto', 'tiposGestion', 'espacios']);
 
       // ---------- Usuarios ----------
       match /usuarios/{uid} {
@@ -127,6 +127,23 @@ service cloud.firestore {
           && get(ruta('/tokensVideo/' + request.resource.data.video.token)).data.expira > request.time
           && request.resource.data.voto == true
           && soloCambia(['video', 'conVideo', 'voto', 'votoAt']);
+        allow delete: if gestor() && (esCabeza() || enMiEquipo(resource.data.path));
+      }
+
+      // ---------- Registro de gestiones (módulo por campaña) ----------
+      // Cada gestión cuelga del dirigente "a través de" quien se hizo (su path): la ve él, sus superiores y la cabeza.
+      match /gestiones/{gid} {
+        allow read: if gestor() && (esCabeza() || enMiEquipo(resource.data.path));
+        allow create: if gestor()
+          && get(ruta('')).data.modulos.gestiones == true
+          && request.resource.data.cargadoPor == request.auth.uid
+          && request.resource.data.path == usuario(request.resource.data.porId).path
+          && (esCabeza() || enMiEquipo(request.resource.data.path));
+        allow update: if gestor()
+          && (esCabeza() || enMiEquipo(resource.data.path))
+          && request.resource.data.cargadoPor == resource.data.cargadoPor
+          && request.resource.data.path == usuario(request.resource.data.porId).path
+          && (esCabeza() || enMiEquipo(request.resource.data.path));
         allow delete: if gestor() && (esCabeza() || enMiEquipo(resource.data.path));
       }
 

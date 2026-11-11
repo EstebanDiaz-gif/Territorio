@@ -60,7 +60,7 @@ async function cargarMe(uid) {
   if (!activo) throw Object.assign(new Error('Tu usuario fue dado de baja de la campaña. Pedile a quien te suma que te vuelva a agregar.'), { code: 'sin-campania' });
   const u = await getDoc(D('usuarios', uid));
   const camp = await getDoc(doc(db, 'campanias', cid));
-  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [], alertas: camp.data()?.alertas || null, videoVoto: !!camp.data()?.videoVoto, modulos: camp.data()?.modulos || {} };
+  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [], alertas: camp.data()?.alertas || null, videoVoto: !!camp.data()?.videoVoto, modulos: camp.data()?.modulos || {}, tiposGestion: camp.data()?.tiposGestion || null, espacios: camp.data()?.espacios || [] };
   return me;
 }
 
@@ -233,10 +233,12 @@ function resumirPadron(registros) {
     const x = (c[r.circuito || '–'] ||= { e: 0, esc: {} });
     x.e++;
     const n = r.escuela || 'Sin escuela';
-    x.esc[n] = (x.esc[n] || 0) + 1;
+    const y = (x.esc[n] ||= { e: 0, m: {} });
+    y.e++;
+    if (r.mesa) y.m[r.mesa] = (y.m[r.mesa] || 0) + 1;
   }
   const out = {};
-  for (const k in c) out[k] = { e: c[k].e, esc: Object.entries(c[k].esc).map(([n, e]) => ({ n, e })) };
+  for (const k in c) out[k] = { e: c[k].e, esc: Object.entries(c[k].esc).map(([n, y]) => ({ n, e: y.e, m: y.m })) };
   return out;
 }
 export async function leerResumenPadron() {
@@ -416,6 +418,28 @@ export async function subirVideoConLink(c, t, dni, archivo, onProgreso) {
 export function guardarVideoObligatorio(v) {
   return sinTrabar(updateDoc(doc(db, 'campanias', cid), { videoVoto: !!v }));
 }
+// ----- registro de gestiones (qué se le dio a quién, cuándo y a través de qué dirigente)
+export function watchGestiones(filtro, cb, alError) {
+  const ws = [where(filtro.campo, '==', filtro.valor)];
+  if (me.rol !== 'cabeza') ws.unshift(where('path', 'array-contains', me.uid));
+  return onSnapshot(query(C('gestiones'), ...ws), (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => { console.error(e); alError?.(e); });
+}
+export async function gestionesDePersona(dni) {
+  const ws = [where('dni', '==', dni)];
+  if (me.rol !== 'cabeza') ws.unshift(where('path', 'array-contains', me.uid));
+  const s = await getDocs(query(C('gestiones'), ...ws));
+  return s.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+export async function guardarGestion(g) {
+  const { id, ...datos } = g;
+  if (id) { await sinTrabar(updateDoc(D('gestiones', id), { ...datos, editadoAt: serverTimestamp() })); return id; }
+  const ref = doc(C('gestiones'));
+  await sinTrabar(setDoc(ref, { ...datos, cargadoPor: me.uid, cargadoNombre: me.nombre, at: Date.now(), creado: serverTimestamp() }));
+  return ref.id;
+}
+export function borrarGestion(id) { return sinTrabar(deleteDoc(D('gestiones', id))); }
+export function guardarTiposGestion(tipos, espacios) { return sinTrabar(updateDoc(doc(db, 'campanias', cid), { tiposGestion: tipos, espacios })); }
+
 export function guardarAlertas(alertas) {
   return sinTrabar(updateDoc(doc(db, 'campanias', cid), { alertas }));
 }

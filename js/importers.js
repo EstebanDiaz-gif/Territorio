@@ -213,3 +213,16 @@ export async function exportarExcel(personas, usuarios, nombreArchivo) {
   XLSX.utils.book_append_sheet(wb, ws, 'Personas');
   XLSX.writeFile(wb, nombreArchivo);
 }
+
+// Excel del registro de gestiones
+export async function exportarGestiones(gestiones, nombreArchivo) {
+  const XLSX = await necesito('XLSX');
+  const filas = [...gestiones].sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))).map((g) => ({
+    Fecha: g.fecha, DNI: g.dni, Nombre: g.nombre, Domicilio: g.domicilio, Circuito: g.circuito, Escuela: g.escuela, Mesa: g.mesa,
+    Gestión: g.tipo, Detalle: g.detalle, Cantidad: g.cantidad, Monto: g.monto || 0, 'Espacio (dirigente)': g.porNombre, 'Cargado por': g.cargadoNombre
+  }));
+  const ws = XLSX.utils.json_to_sheet(filas);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Gestiones');
+  XLSX.writeFile(wb, nombreArchivo);
+}

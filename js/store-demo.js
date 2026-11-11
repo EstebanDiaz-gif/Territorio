@@ -13,6 +13,25 @@ function cargar() {
   try { db = JSON.parse(localStorage.getItem(KEY)); } catch { db = null; }
   if (!db || !db.usuarios) db = semilla();
   db.ubicaciones ||= semillaUbicaciones();
+  db.gestiones ||= semillaGestiones();
+}
+// Gestiones de ejemplo (este mes y el anterior), cargadas por movilizadores y dirigentes de la demo
+function semillaGestiones() {
+  const tipos = [['Pañales', 'Talle G', 2, 9000], ['Mercadería', 'Bolsón', 1, 15000], ['Medicamentos', 'Receta de presión', 1, 12000], ['Anteojos', 'Lectura', 1, 20000], ['Garrafa', '10 kg', 1, 14000], ['Turno médico', 'Oftalmología, Hospital Padilla', 1, 0], ['Leche', 'Maternizada', 3, 7500], ['Chapas', '4 chapas', 4, 48000]];
+  const quienes = ['mov1', 'mov2', 'mov3', 'mov4', 'mov5', 'dir1', 'dir2'];
+  const ps = Object.values(db.personas).filter((p) => p.tipo === 'votante');
+  const hoy = new Date(); const out = {}; let n = 0;
+  for (let i = 0; i < 26 && ps.length; i++) {
+    const p = ps[(i * 7) % ps.length]; const [tipo, detalle, cantidad, monto] = tipos[i % tipos.length];
+    const u = db.usuarios[quienes[i % quienes.length]]; if (!u) continue;
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - (i % 3 === 0 ? 1 : 0), Math.max(1, (i * 3) % 27 + 1));
+    if (d > hoy) d.setDate(Math.max(1, hoy.getDate() - (i % 5)));
+    const fecha = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const id = 'g' + (++n);
+    out[id] = { id, fecha, mes: fecha.slice(0, 7), anio: fecha.slice(0, 4), dni: p.dni, nombre: p.nombre, domicilio: p.domicilio || '', circuito: p.circuito || '', escuela: p.escuela || '', mesa: p.mesa || '',
+      tipo, detalle, cantidad, monto, porId: u.uid, porNombre: u.nombre, path: u.path, cargadoPor: u.uid, cargadoNombre: u.nombre, at: d.getTime() };
+  }
+  return out;
 }
 // Posiciones de prueba en San Miguel de Tucumán (minutos atrás, para que siempre se vean "recientes")
 function semillaUbicaciones() {
@@ -41,7 +60,7 @@ export async function init() {
 // En la demo, si no se configuraron alertas, se muestran unas de ejemplo con la fecha de hoy
 const hoyDemo = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const alertasDemo = () => ({ fecha: hoyDemo(), minimo: 5, pasos: [{ hora: '08:00', pct: 40, niveles: 1 }, { hora: '12:00', pct: 50, niveles: 2 }, { hora: '15:00', pct: 60, niveles: 99 }] });
-const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [], alertas: db.campania.alertas || alertasDemo(), videoVoto: !!db.campania.videoVoto, modulos: { video: true } });
+const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [], alertas: db.campania.alertas || alertasDemo(), videoVoto: !!db.campania.videoVoto, modulos: { video: true, gestiones: true }, tiposGestion: db.campania.tiposGestion || null, espacios: db.campania.espacios || ['Agrupación Centro', 'Agrupación Barrio Norte', 'Juventud'] });
 
 export async function login(dni, pass) {
   await espera();
@@ -152,10 +171,12 @@ export async function leerResumenPadron() {
     const x = (c[r.circuito || '–'] ||= { e: 0, esc: {} });
     x.e++;
     const n = r.escuela || 'Sin escuela';
-    x.esc[n] = (x.esc[n] || 0) + 1;
+    const y = (x.esc[n] ||= { e: 0, m: {} });
+    y.e++;
+    if (r.mesa) y.m[r.mesa] = (y.m[r.mesa] || 0) + 1;
   }
   const out = {};
-  for (const k in c) out[k] = { e: c[k].e, esc: Object.entries(c[k].esc).map(([n, e]) => ({ n, e })) };
+  for (const k in c) out[k] = { e: c[k].e, esc: Object.entries(c[k].esc).map(([n, y]) => ({ n, e: y.e, m: y.m })) };
   return Object.keys(out).length ? out : null;
 }
 export const recalcularResumenPadron = leerResumenPadron;
@@ -319,6 +340,21 @@ export async function subirVideoConLink(c, t, dni, archivo, onProgreso) {
   guardar();
 }
 export async function guardarVideoObligatorio(v) { db.campania.videoVoto = !!v; if (me) me.videoVoto = !!v; guardar(); }
+const gestionVisible = (g) => me.rol === 'cabeza' || (g.path || []).includes(me.uid);
+export function watchGestiones(filtro, cb) {
+  const f = () => cb(Object.values(db.gestiones || {}).filter((g) => g[filtro.campo] === filtro.valor && gestionVisible(g)));
+  subs.add(f); f();
+  return () => subs.delete(f);
+}
+export async function gestionesDePersona(dni) { return Object.values(db.gestiones || {}).filter((g) => g.dni === dni && gestionVisible(g)); }
+export async function guardarGestion(g) {
+  await espera();
+  const id = g.id || 'g' + Date.now().toString(36);
+  db.gestiones[id] = g.id ? { ...db.gestiones[id], ...g } : { ...g, id, cargadoPor: me.uid, cargadoNombre: me.nombre, at: Date.now() };
+  guardar(); return id;
+}
+export async function borrarGestion(id) { delete db.gestiones[id]; guardar(); }
+export async function guardarTiposGestion(tipos, espacios) { Object.assign(db.campania, { tiposGestion: tipos, espacios }); if (me) Object.assign(me, { tiposGestion: tipos, espacios }); guardar(); }
 export async function guardarAlertas(alertas) { db.campania.alertas = alertas; if (me) me.alertas = alertas; guardar(); }
 export async function guardarListas(listas, categorias) { Object.assign(db.campania, { listas, categorias }); if (me) Object.assign(me, { listas, categorias }); guardar(); }
 export async function guardarUbicacion({ lat, lng, prec }) {

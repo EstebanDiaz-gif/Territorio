@@ -3,7 +3,7 @@ import {
   ROLES, ROL_LABEL, ROL_CORTO, nivel, rolAbajo, ESTADOS, ESTADO_LABEL, TIPOS, TIPO_LABEL,
   normDni, dniValido, fmtDni, telWhatsApp, idLista, palabrasDe, circuitosDe, unCircuito, textoCircuitos
 } from './roles.js';
-import { leerArchivo, mapearPersonas, mapearPadron, exportarExcel, NOMBRE_COLUMNA } from './importers.js';
+import { leerArchivo, mapearPersonas, mapearPadron, exportarExcel, exportarGestiones, NOMBRE_COLUMNA } from './importers.js';
 
 const S = FIREBASE_CONFIG ? await import('./store-firebase.js') : await import('./store-demo.js');
 const DEMO = S.modo === 'demo';
@@ -171,6 +171,7 @@ const I = {
   mas: '<path d="M12 5v14M5 12h14"/>',
   subir: '<path d="M12 15V3M7 8l5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
   bajar: '<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>',
+  gestiones: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M8.5 10h7M8.5 14h7M8.5 18h4"/>',
   video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/>',
   qr: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 20h2M20 14v2"/>',
   casa: '<path d="M3.5 11.5L12 4l8.5 7.5"/><path d="M5.5 10v9.5h13V10"/><path d="M10 19.5v-5h4v5"/>',
@@ -238,6 +239,7 @@ function iniciarSesion(me) {
 
 async function salir() {
   detenerGps(false);
+  st.gest.unsub?.(); st.gest.unsub = null; st.gest.clave = ''; st.gest.lista = [];
   st.unsubs.forEach((u) => u()); st.unsubs = [];
   st.unsubPagina?.(); st.unsubPagina = null; st.clavePagina = null; cachePersonas.clear();
   for (const k in conteos) delete conteos[k];
@@ -303,6 +305,7 @@ const marca = () => `<div class="marca"><div class="logo">${isotipo(32)}</div><d
 // ---------------------------------------------------------------- estructura
 function tabsDisponibles() {
   const t = [['gente', 'Gente'], ['cargar', 'Cargar'], ['dia', 'Día E']];
+  if (moduloGestiones()) t.push(['gestiones', 'Gestiones']);
   if (!esMov()) t.push(['equipo', 'Equipo'], ['panel', 'Panel']);
   return t;
 }
@@ -319,7 +322,8 @@ function pintar() {
   pintarTop();
   if (liviano()) { const viejo = Date.now() - 10000; for (const k in conteos) if (conteos[k].t < viejo) conteos[k].t = 0; }
   suscribirPagina();
-  const v = { gente: vistaGente, cargar: vistaCargar, dia: vistaDia, equipo: vistaEquipo, panel: vistaPanel }[st.tab];
+  suscribirGestiones();
+  const v = { gente: vistaGente, cargar: vistaCargar, dia: vistaDia, equipo: vistaEquipo, panel: vistaPanel, gestiones: vistaGestiones }[st.tab];
   $('#main').innerHTML = '<div id="alertas"></div>' + v();
   refrescarPartes();
   window.scrollTo(0, 0);
@@ -348,7 +352,7 @@ function stats(lista) {
 function pintarTop() {
   const me = st.me;
   const s = statsGlobal();
-  const titulos = { gente: esMov() ? 'Mi gente' : 'Gente del equipo', cargar: 'Cargar persona', dia: 'Día de elección', equipo: 'Equipo', panel: 'Panel' };
+  const titulos = { gente: esMov() ? 'Mi gente' : 'Gente del equipo', cargar: 'Cargar persona', dia: 'Día de elección', equipo: 'Equipo', panel: 'Panel', gestiones: 'Gestiones' };
   const sub = `${ROL_LABEL[me.rol]}${me.circuito ? ' · ' + esc(textoCircuitos(me, true)) : ''} · ${esc(me.campania || '')}`;
   let extra = '';
   if (st.tab === 'gente') {
@@ -385,6 +389,7 @@ function refrescarPartes() {
   if (st.tab === 'gente') pintarLista();
   if (st.tab === 'dia') pintarDia();
   if (st.tab === 'equipo') pintarEquipo();
+  if (st.tab === 'gestiones') pintarGestiones();
   if (st.tab === 'panel') { cargarResumen(); pintarTablero(); pintarFiscalizacion(); pintarConflictos(); }
 }
 
@@ -465,6 +470,7 @@ function pintarLista() {
 
 function hojaPersona(dni, confirmarBorrado = false) {
   const p = personaLocal(dni);
+  if (moduloGestiones()) setTimeout(() => pintarGestionesPersona(dni), 0);
   if (!p) { cerrarHoja(); return; }
   const destinos = esMov() ? [] : [st.me, ...miEquipo()].filter((u) => u.uid !== p.ownerId);
   const wa = waUrl(p.tel, textoRecordatorio(p));
@@ -501,6 +507,8 @@ function hojaPersona(dni, confirmarBorrado = false) {
     </div>
     <div><label class="label" for="p-nota">Nota</label><textarea id="p-nota" class="input" rows="2" placeholder="Ej: lo busca Diego a las 10">${esc(p.revisar ? '' : p.nota)}</textarea></div>
     ${htmlVideoVoto(p)}
+    ${moduloGestiones() ? `<div class="card pad stack"><div class="row"><span style="color:var(--accent)">${ic('gestiones', 24)}</span><b class="grow">Gestiones</b>
+      <button type="button" class="btn btn-sec btn-sm" data-act="g-nueva-p">${ic('mas', 16)} Registrar</button></div><div id="p-gest" class="muted small">Cargando…</div></div>` : ''}
     ${videoExigido() && !p.voto && st.me.rol !== 'cabeza' ? '' : `<button type="button" class="btn btn-full ${p.voto ? 'btn-ok' : ''}" data-act="p-voto">${p.voto ? ic('ok') + ' Ya votó · tocar para deshacer' : (videoExigido() ? 'Marcar que votó sin video (solo cabeza)' : 'Marcar que ya votó')}</button>`}
     <div class="muted">Es de <b>${esc(p.ownerNombre)}</b>${p.ownerId === st.me.uid ? ' (vos)' : ''}</div>
     ${p.tipo && p.tipo !== 'votante' ? (st.usuarios.some((u) => u.dni === p.dni)
@@ -733,6 +741,158 @@ function pintarDiaCabeza(el) {
     ${bloqueCircuitos({})}`;
 }
 
+// ---------------------------------------------------------------- REGISTRO DE GESTIONES
+// Qué se le dio a quién, cuándo, por qué espacio y a través de qué dirigente. Módulo por campaña (modulos.gestiones).
+const moduloGestiones = () => !!st.me?.modulos?.gestiones;
+const TIPOS_GESTION = ['Mercadería', 'Pañales', 'Leche', 'Medicamentos', 'Anteojos', 'Garrafa', 'Materiales de construcción', 'Chapas', 'Colchón', 'Turno médico', 'Trámite', 'Otro'];
+const tiposGestion = () => (st.me?.tiposGestion?.length ? st.me.tiposGestion : TIPOS_GESTION);
+const espacios = () => st.me?.espacios || [];
+const hoyISOg = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const fmtFecha = (f) => (f ? f.split('-').reverse().join('/') : '');
+const fmtPlata = (n) => '$ ' + Math.round(Number(n) || 0).toLocaleString('es-AR');
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+st.gest = { lista: [], cargando: false, periodo: hoyISOg().slice(0, 7), q: '', tipo: '', por: '', clave: '', unsub: null };
+function suscribirGestiones() {
+  if (st.tab !== 'gestiones' || !moduloGestiones()) { st.gest.unsub?.(); st.gest.unsub = null; st.gest.clave = ''; return; }
+  const p = st.gest.periodo; const filtro = p.length === 4 ? { campo: 'anio', valor: p } : { campo: 'mes', valor: p };
+  const clave = filtro.campo + filtro.valor;
+  if (clave === st.gest.clave && st.gest.unsub) return;
+  st.gest.unsub?.(); st.gest.clave = clave; st.gest.cargando = true;
+  st.gest.unsub = S.watchGestiones(filtro, (x) => { st.gest.lista = x; st.gest.cargando = false; if (st.tab === 'gestiones') pintarGestiones(); },
+    (e) => { st.gest.cargando = false; const el = $('#g-lista'); if (el) el.innerHTML = `<div class="aviso bad">${esc(mensajeError(e))}</div>`; });
+}
+function periodos() {
+  const out = []; const d = new Date();
+  for (let i = 0; i < 12; i++) { const x = new Date(d.getFullYear(), d.getMonth() - i, 1); out.push([`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`, `${MESES[x.getMonth()]} ${x.getFullYear()}`]); }
+  out.push([String(d.getFullYear()), `Todo ${d.getFullYear()}`], [String(d.getFullYear() - 1), `Todo ${d.getFullYear() - 1}`]);
+  return out;
+}
+function vistaGestiones() {
+  const g = st.gest;
+  return `
+    <button type="button" class="btn btn-full" data-act="g-nueva">${ic('mas')} Registrar gestión</button>
+    <div class="row wrap" style="gap:8px">
+      <select id="g-periodo" class="input grow" aria-label="Período">${periodos().map(([v, l]) => `<option value="${v}" ${g.periodo === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select id="g-tipo" class="input grow" aria-label="Tipo de gestión"><option value="">Todas las gestiones</option>${tiposGestion().map((t) => `<option ${g.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      ${esMov() ? '' : `<select id="g-por" class="input grow" aria-label="A través de"><option value="">Todos los espacios</option>${[st.me, ...miEquipo()].map((u) => `<option value="${u.uid}" ${g.por === u.uid ? 'selected' : ''}>${esc(u.nombre)} · ${ROL_CORTO[u.rol]}</option>`).join('')}</select>`}
+    </div>
+    <label class="search">${ic('buscar', 18)}<input id="g-q" type="search" placeholder="Buscar por nombre o DNI" value="${esc(g.q)}" aria-label="Buscar gestión"></label>
+    <div id="g-resumen"></div>
+    <div id="g-lista" class="stack"></div>`;
+}
+function gestionesFiltradas() {
+  const g = st.gest; const q = g.q.trim().toLowerCase(); const qd = normDni(g.q);
+  return g.lista.filter((x) => (!g.tipo || x.tipo === g.tipo) && (!g.por || (x.path || []).includes(g.por))
+    && (!q || String(x.nombre).toLowerCase().includes(q) || (qd.length >= 3 && String(x.dni).includes(qd)) || String(x.porNombre || '').toLowerCase().includes(q)))
+    .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)) || (b.at || 0) - (a.at || 0));
+}
+function pintarGestiones() {
+  const el = $('#g-lista'); const rs = $('#g-resumen'); if (!el) return;
+  if (st.gest.cargando && !st.gest.lista.length) { el.innerHTML = '<div class="vacio">Cargando…</div>'; rs.innerHTML = ''; return; }
+  const lista = gestionesFiltradas();
+  const monto = lista.reduce((a, x) => a + (Number(x.monto) || 0), 0);
+  const personas = new Set(lista.map((x) => x.dni || x.nombre)).size;
+  const agrupar = (f) => { const m = {}; for (const x of lista) { const k = f(x) || '–'; m[k] ||= { n: 0, $: 0 }; m[k].n++; m[k].$ += Number(x.monto) || 0; } return Object.entries(m).sort((a, b) => b[1].n - a[1].n); };
+  const tabla = (titulo, filas, clave) => filas.length ? `<details class="herr" data-recordar="g-${clave}" ${st.abiertosUI?.['g-' + clave] ? 'open' : ''}><summary><span class="grow"><b>${titulo}</b></span><span class="chev" aria-hidden="true">▸</span></summary>
+    <div class="herr-body">${filas.map(([k, v]) => `<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span>${esc(k)}</span><span class="num small"><b>${v.n}</b>${v.$ ? ' · ' + fmtPlata(v.$) : ''}</span></div>`).join('')}</div></details>` : '';
+  rs.innerHTML = lista.length ? `<div class="tiles">
+      <div class="tile t-acc"><b>${lista.length}</b><span>gestiones</span></div>
+      <div class="tile t-ok"><b>${personas}</b><span>personas</span></div>
+      <div class="tile t-neutral"><b style="font-size:22px">${fmtPlata(monto)}</b><span>monto total</span></div>
+    </div>
+    <div class="stack" style="gap:8px">
+      ${tabla('Por gestión', agrupar((x) => x.tipo), 'tipo')}
+      ${esMov() ? '' : tabla('Por espacio (dirigente)', agrupar((x) => x.porNombre), 'por')}
+      ${tabla('Por circuito', agrupar((x) => (x.circuito ? 'Circuito ' + x.circuito : 'Sin circuito')), 'circ')}
+    </div>
+    <button type="button" class="btn btn-sec" data-act="g-excel">${ic('bajar', 18)} Descargar Excel</button>` : '';
+  el.innerHTML = lista.length ? lista.map((x) => `<button type="button" class="card pad gente-item" data-act="g-ver" data-id="${esc(x.id)}" style="text-align:left;display:block;width:100%">
+      <div class="row" style="justify-content:space-between"><b>${esc(x.nombre || 'Sin nombre')}</b><span class="muted small num">${fmtFecha(x.fecha)}</span></div>
+      <div><span class="pill p-ok">${esc(x.tipo)}</span>${x.cantidad > 1 ? ` <b>×${x.cantidad}</b>` : ''} ${esc(x.detalle || '')}${x.monto ? ` · <b class="num">${fmtPlata(x.monto)}</b>` : ''}</div>
+      <div class="muted small">Espacio de ${esc(x.porNombre || '')}${x.circuito ? ` · Circ. ${esc(x.circuito)}${x.mesa ? ' · Mesa ' + esc(x.mesa) : ''}` : ''}</div>
+    </button>`).join('') : `<div class="vacio">${st.gest.lista.length ? 'No hay gestiones con ese filtro.' : 'Todavía no hay gestiones registradas en este período.'}</div>`;
+}
+
+// Formulario: nueva gestión (o editar una existente)
+function hojaGestion(g = null, dniInicial = '') {
+  const x = g || { fecha: hoyISOg(), dni: dniInicial, cantidad: 1, porId: st.me.uid, espacio: '' };
+  const p = x.dni ? personaLocal(x.dni) : null;
+  const datos = g || (p ? { nombre: p.nombre, domicilio: p.domicilio, circuito: p.circuito, escuela: p.escuela, mesa: p.mesa } : {});
+  if (!g && p && p.ownerId && [st.me, ...miEquipo()].some((u) => u.uid === p.ownerId)) x.porId = p.ownerId;
+  st.gForm = { id: g?.id || null, ...datos };
+  const tipos = tiposGestion();
+  abrirHoja(`
+    <div class="row"><h2 class="grow">${g ? 'Editar gestión' : 'Registrar gestión'}</h2><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    <form id="f-gestion" class="stack" autocomplete="off">
+      <div><label class="label" for="g-fecha">Fecha de entrega</label><input id="g-fecha" type="date" class="input" value="${esc(x.fecha)}" required></div>
+      <div><label class="label" for="g-dni">A quién · DNI</label><input id="g-dni" class="input" inputmode="numeric" value="${esc(x.dni || '')}" placeholder="Sin puntos"></div>
+      <div id="g-persona" class="muted small">${datos.nombre ? `${esc(datos.nombre)}${datos.circuito ? ` · Circ. ${esc(datos.circuito)}` : ''}${datos.mesa ? ` · Mesa ${esc(datos.mesa)}` : ''}` : 'Escribí el DNI: si está en el padrón se completa solo.'}</div>
+      <div><label class="label" for="g-nombre">Nombre y apellido</label><input id="g-nombre" class="input" value="${esc(datos.nombre || '')}" required></div>
+      <div><label class="label" for="g-dom">Domicilio</label><input id="g-dom" class="input" value="${esc(datos.domicilio || '')}" placeholder="Calle y número, barrio"></div>
+      <div><label class="label" for="g-tipo-f">Gestión</label><select id="g-tipo-f" class="input" required><option value="">Elegí qué se entregó</option>${tipos.map((t) => `<option ${x.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}${x.tipo && !tipos.includes(x.tipo) ? `<option selected>${esc(x.tipo)}</option>` : ''}</select></div>
+      <div><label class="label" for="g-detalle">Detalle</label><input id="g-detalle" class="input" value="${esc(x.detalle || '')}" placeholder="Ej: talle G, receta de presión, 4 chapas"></div>
+      <div class="row" style="gap:10px">
+        <div class="grow"><label class="label" for="g-cant">Cantidad</label><input id="g-cant" type="number" min="1" class="input num" value="${esc(x.cantidad || 1)}"></div>
+        <div class="grow"><label class="label" for="g-monto">Monto $ <span class="muted">(opcional)</span></label><input id="g-monto" type="number" min="0" class="input num" value="${esc(x.monto || '')}"></div>
+      </div>
+      <div><label class="label" for="g-por-f">Espacio · dirigente al que pertenece</label><select id="g-por-f" class="input">${[st.me, ...miEquipo()].map((u) => `<option value="${u.uid}" ${x.porId === u.uid ? 'selected' : ''}>${esc(u.nombre)} · ${ROL_CORTO[u.rol]}</option>`).join('')}</select></div>
+      <div class="error" id="g-err" role="alert"></div>
+      <button class="btn btn-full" type="submit">${g ? 'Guardar cambios' : 'Registrar gestión'}</button>
+      ${g ? `<div class="muted small">Cargada por ${esc(g.cargadoNombre || '')}${g.at ? ' el ' + new Date(g.at).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }) : ''}</div>
+        <button type="button" class="btn btn-ghost" data-act="g-borrar" data-id="${esc(g.id)}">Borrar esta gestión</button>` : ''}
+    </form>`, { tipo: 'gestion' });
+  if (!g && !dniInicial) $('#g-dni').focus();
+}
+let tGestDni = null;
+async function buscarPersonaGestion(dni) {
+  if (!dniValido(dni)) return;
+  const p = personaLocal(dni);
+  const pd = p ? null : await S.buscarPadron(dni).catch(() => null);
+  const d = p || pd; const info = $('#g-persona'); if (!info) return;
+  if (!d) { info.textContent = 'No está en el padrón: completá el nombre a mano.'; return; }
+  Object.assign(st.gForm, { nombre: d.nombre, domicilio: d.domicilio || '', circuito: d.circuito || '', escuela: d.escuela || '', mesa: d.mesa || '' });
+  info.textContent = `${d.nombre}${d.circuito ? ' · Circ. ' + d.circuito : ''}${d.mesa ? ' · Mesa ' + d.mesa : ''}${p ? ' · ya cargada' : ' · del padrón'}`;
+  if (!$('#g-nombre').value) $('#g-nombre').value = d.nombre;
+  if (p?.ownerId && !st.gForm.id) { const sel = $('#g-por-f'); if ([...sel.options].some((o) => o.value === p.ownerId)) sel.value = p.ownerId; }
+  if (!$('#g-dom').value) $('#g-dom').value = d.domicilio || '';
+}
+async function guardarGestionUI(form) {
+  const err = $('#g-err');
+  const dni = normDni($('#g-dni').value); const tipo = $('#g-tipo-f').value; const nombre = $('#g-nombre').value.trim();
+  if (!nombre) { err.textContent = 'Poné a quién se le entregó.'; return; }
+  if (!tipo) { err.textContent = 'Elegí qué gestión fue.'; return; }
+  const por = usuarioPorId($('#g-por-f').value) || st.me;
+  const fecha = $('#g-fecha').value || hoyISOg();
+  const f = st.gForm;
+  const g = {
+    ...(f.id ? { id: f.id } : {}),
+    fecha, mes: fecha.slice(0, 7), anio: fecha.slice(0, 4), dni, nombre: nombre.slice(0, 120), domicilio: $('#g-dom').value.trim().slice(0, 120),
+    circuito: f.circuito || '', escuela: f.escuela || '', mesa: f.mesa || '',
+    tipo, detalle: $('#g-detalle').value.trim().slice(0, 200),
+    cantidad: Math.max(1, parseInt($('#g-cant').value, 10) || 1), monto: Math.max(0, Number($('#g-monto').value) || 0),
+    porId: por.uid, porNombre: por.nombre, path: por.path
+  };
+  const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Guardando…';
+  try {
+    await S.guardarGestion(g);
+    cerrarHoja(); toast(f.id ? 'Gestión actualizada' : `Gestión registrada: ${tipo} para ${primerNombre(nombre)}`);
+    if (st.tab === 'gestiones' && g.mes !== st.gest.periodo && g.anio !== st.gest.periodo) { st.gest.periodo = g.mes; pintar(); }
+  } catch (e) { err.textContent = mensajeError(e); btn.disabled = false; btn.textContent = 'Registrar gestión'; }
+}
+// En la ficha de la persona: lo que recibió
+async function pintarGestionesPersona(dni) {
+  const el = $('#p-gest'); if (!el) return;
+  try {
+    const xs = (await S.gestionesDePersona(dni)).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+    if (!$('#p-gest')) return;
+    el.innerHTML = xs.length ? xs.map((x) => `<button type="button" class="votante" data-act="g-ver" data-id="${esc(x.id)}" style="width:100%;text-align:left;background:none;border:0;padding:8px 0">
+        <div class="grow"><b>${esc(x.tipo)}</b>${x.cantidad > 1 ? ' ×' + x.cantidad : ''} <span class="muted">${esc(x.detalle || '')}</span>
+        <div class="muted small">${fmtFecha(x.fecha)} · espacio de ${esc(x.porNombre || '')}${x.monto ? ' · ' + fmtPlata(x.monto) : ''}</div></div></button>`).join('')
+      : '<div class="muted small">Todavía no tiene gestiones registradas.</div>';
+    st.gPersona = Object.fromEntries(xs.map((x) => [x.id, x]));
+  } catch (e) { el.innerHTML = `<div class="error">${esc(mensajeError(e))}</div>`; }
+}
+
 // ---------------------------------------------------------------- VIDEO DE CONSTANCIA DE VOTO
 // Un video corto de la persona con su constancia de voto en la escuela. Lo sube el movilizador (de la galería,
 // si se lo mandaron por WhatsApp) o la misma persona con un link/QR personal. Al subirlo queda marcado que votó.
@@ -861,6 +1021,7 @@ const alertasVistas = new Set();
 function pintarAlertas() {
   const el = $('#alertas');
   if (!el || !st.me) return;
+  if (st.tab === 'gestiones') { el.innerHTML = ''; return; }
   const { paso, lista } = alertasParaMi();
   if (!lista.length) { el.innerHTML = ''; return; }
   const nuevas = lista.filter((a) => !alertasVistas.has(paso.hora + a.u.uid));
@@ -1241,6 +1402,9 @@ function vistaPanel() {
         <textarea id="cats-txt" class="input" rows="3" placeholder="Gobernador&#10;Legisladores&#10;Concejales">${esc((st.me.categorias || []).map((l) => l.nombre).join('\n'))}</textarea>
         <div class="muted small" style="margin-top:4px">Si la elección tiene una sola categoría, dejalo vacío.</div></div>
         <button class="btn" data-act="listas-guardar">Guardar</button>`) : ''}
+      ${st.me.rol === 'cabeza' && moduloGestiones() ? herr('gest', 'gestiones', 'Tipos de gestión', 'Qué se entrega', `
+        <div><label class="label" for="g-tipos-txt">Tipos de gestión (uno por renglón)</label><textarea id="g-tipos-txt" class="input" rows="7">${esc(tiposGestion().join('\n'))}</textarea></div>
+        <button type="button" class="btn" data-act="g-tipos-guardar">Guardar listas</button>`) : ''}
       ${st.me.rol === 'cabeza' && moduloVideo() ? herr('video', 'video', 'Video de constancia de voto', 'Pedir un video para marcar que votó', `
         <div class="muted">Cada persona puede tener un video corto con su constancia de voto en la escuela. Lo sube el movilizador o la persona con su link o QR. Al subirse, queda marcado que votó.</div>
         <div class="row"><span class="grow">¿Exigir el video para marcar “Ya votó”?</span>
@@ -1324,13 +1488,16 @@ function bloqueCircuitos(porCirc) {
       const x = (escs[p.escuela || 'Sin escuela'] ||= { n: 0, v: 0, e: 0 });
       x.n++; if (p.voto) x.v++;
     }
-    for (const r of res[k]?.esc || []) (escs[r.n] ||= { n: 0, v: 0, e: 0 }).e = r.e;
+    for (const r of res[k]?.esc || []) Object.assign((escs[r.n] ||= { n: 0, v: 0, e: 0 }), { e: r.e, m: r.m });
     const nombres = Object.keys(escs).sort((a, b) => (escs[b].n || 0) - (escs[a].n || 0) || a.localeCompare(b));
+    st.escAbiertas ||= new Set();
     html += `<div class="circ-esc">${nombres.map((nm) => {
-      const x = escs[nm];
-      return `<div><div class="row small" style="justify-content:space-between;gap:8px"><span style="font-weight:600">${esc(nm)}</span>
-        <span class="num"><b>${x.n == null ? '…' : pct(x.v, x.n) + '%'}</b> <span class="muted">· ${fmt(x.v)}/${fmt(x.n)}</span></span></div>
-        ${barra(x.v, x.n)}${x.e ? `<div class="muted small">${fmt(x.e)} electores</div>` : ''}</div>`;
+      const x = escs[nm]; const clave = k + '|' + nm; const ab = st.escAbiertas.has(clave);
+      return `<div><button type="button" class="circ-btn" style="padding:4px 0" data-act="esc-toggle" data-k="${esc(clave)}" aria-expanded="${ab}">
+        <span class="row small" style="justify-content:space-between;gap:8px"><span style="font-weight:600"><span class="chev" aria-hidden="true">${ab ? '▾' : '▸'}</span> ${esc(nm)}</span>
+        <span class="num"><b>${x.n == null ? '…' : pct(x.v, x.n) + '%'}</b> <span class="muted">· ${fmt(x.v)}/${fmt(x.n)}</span></span></span>
+        ${barra(x.v, x.n)}${x.e ? `<span class="muted small" style="display:block">${fmt(x.n)} cargados de ${fmt(x.e)} electores (${x.n == null ? '…' : pct(x.n, x.e) + '%'})</span>` : ''}</button>
+        ${ab ? tablaMesas(k, nm, x.m || {}) : ''}</div>`;
     }).join('')}</div>`;
     return html;
   }).join('');
@@ -1338,6 +1505,31 @@ function bloqueCircuitos(porCirc) {
     ${filas}
     ${cab && st.resumen === null ? '<button class="btn btn-ghost btn-sm" data-act="circ-recalcular">Mostrar todos los circuitos del padrón</button>' : ''}
   </div>`;
+}
+
+// Carga por mesa: cuánta gente cargada tiene cada mesa frente a sus electores del padrón (para ver dónde reforzar)
+function tablaMesas(k, nm, electores) {
+  const lv = liviano(); const mesas = {};
+  for (const [m, e] of Object.entries(electores)) mesas[m] = { e, n: 0, v: 0 };
+  if (!lv) for (const p of st.personas) {
+    if ((p.circuito || '–') !== k || (p.escuela || 'Sin escuela') !== nm || !p.mesa) continue;
+    const x = (mesas[p.mesa] ||= { e: 0, n: 0, v: 0 }); x.n++; if (p.voto) x.v++;
+  }
+  if (lv) for (const m of Object.keys(mesas)) {
+    const f = [['circuito', '==', k], ['escuela', '==', nm], ['mesa', '==', m]];
+    mesas[m].n = conteo('m' + k + nm + m, f); mesas[m].v = conteo('mv' + k + nm + m, [...f, ['voto', '==', true]]);
+  }
+  const lista = Object.keys(mesas).sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  if (!lista.length) return '<div class="muted small" style="padding:6px 0 10px 18px">Sin datos por mesa (volvé a subir el padrón para verlos).</div>';
+  const cobs = lista.map((m) => (mesas[m].e && mesas[m].n != null ? mesas[m].n / mesas[m].e : null)).filter((x) => x != null);
+  const prom = cobs.length ? cobs.reduce((a, b) => a + b, 0) / cobs.length : 0;
+  return `<div style="padding:4px 0 10px 18px" class="stack">${lista.map((m) => {
+    const x = mesas[m]; const cob = x.e && x.n != null ? x.n / x.e : null;
+    const flojo = cob != null && x.e >= 20 && cob < prom * 0.6;
+    return `<div class="small"><div class="row" style="justify-content:space-between;gap:8px"><span>Mesa <b>${esc(m)}</b>${flojo ? ' <span class="pill p-warn">floja</span>' : ''}</span>
+      <span class="num"><b>${fmtN(x.n)}</b>${x.e ? `/${fmtN(x.e)} · ${cob == null ? '…' : Math.round(cob * 100) + '%'}` : ''} <span class="muted">· votaron ${fmtN(x.v)}</span></span></div>
+      ${x.e ? `<div class="bar"><i style="width:${cob == null ? 0 : Math.min(100, Math.round(cob * 100))}%"></i></div>` : ''}</div>`;
+  }).join('')}<div class="muted small">Cargados sobre electores de la mesa. “Floja” = bastante por debajo del promedio de la escuela.</div></div>`;
 }
 
 function cargarResumen(forzar = false) {
@@ -1980,6 +2172,18 @@ const acciones = {
   'nuevo-usuario': (el) => hojaNuevoUsuario(el.dataset.rol, el.dataset.padre || null),
   'eq-toggle': (el) => { const id = el.dataset.uid; if (st.abiertos.has(id)) st.abiertos.delete(id); else st.abiertos.add(id); pintarEquipo(); },
   'eq-opciones': (el) => hojaQuitarUsuario(el.dataset.uid),
+  'g-nueva': () => hojaGestion(),
+  'g-nueva-p': () => hojaGestion(null, sheetCtx.dni),
+  'g-ver': (el) => { const x = st.gest.lista.find((y) => y.id === el.dataset.id) || st.gPersona?.[el.dataset.id]; if (x) hojaGestion(x); },
+  'g-borrar': async (el) => {
+    if (el.dataset.confirmar !== '1') { el.dataset.confirmar = '1'; el.textContent = 'Tocá de nuevo para borrarla'; return; }
+    try { await S.borrarGestion(el.dataset.id); cerrarHoja(); toast('Gestión borrada'); } catch (e) { toast(mensajeError(e)); }
+  },
+  'g-excel': async () => { try { await exportarGestiones(gestionesFiltradas(), `Gestiones-${st.gest.periodo}.xlsx`); toast('Excel descargado'); } catch (e) { toast(mensajeError(e)); } },
+  'g-tipos-guardar': async () => {
+    const tipos = [...new Set($('#g-tipos-txt').value.split('\n').map((x) => x.trim()).filter(Boolean))].slice(0, 60);
+    try { await S.guardarTiposGestion(tipos, espacios()); st.me.tiposGestion = tipos; toast('Tipos de gestión guardados'); } catch (e) { toast(mensajeError(e)); }
+  },
   'vv-link': () => hojaLinkVideo(sheetCtx.dni),
   'vv-reintentar': () => { if (vv.archivo && vv.dni === sheetCtx?.dni) subirVideoUI(vv.archivo); },
   'vv-ver': async () => {
@@ -2052,6 +2256,7 @@ const acciones = {
       el.disabled = false; el.textContent = 'Quitar';
     }
   },
+  'esc-toggle': (el) => { const kk = el.dataset.k; st.escAbiertas ||= new Set(); if (st.escAbiertas.has(kk)) st.escAbiertas.delete(kk); else st.escAbiertas.add(kk); refrescarPartes(); },
   'circ-toggle': (el) => { const k = el.dataset.c; if (st.circAbiertos.has(k)) st.circAbiertos.delete(k); else st.circAbiertos.add(k); refrescarPartes(); },
   'circ-recalcular': async (el) => {
     el.disabled = true; el.textContent = 'Leyendo el padrón…';
@@ -2189,12 +2394,15 @@ document.addEventListener('submit', async (e) => {
   }
   if (f.id === 'f-usuario') crearUsuario(f);
   if (f.id === 'f-clave') guardarMiClave(f);
+  if (f.id === 'f-gestion') guardarGestionUI(f);
 });
 
 let tBusqueda = null;
 document.addEventListener('input', (e) => {
   const id = e.target.id;
   if (e.target.dataset?.voto) { st.fx.votos[e.target.dataset.voto] = e.target.value; actualizarSumaActa(); }
+  if (id === 'g-q') { st.gest.q = e.target.value; pintarGestiones(); }
+  if (id === 'g-dni') { clearTimeout(tGestDni); const v = normDni(e.target.value); tGestDni = setTimeout(() => buscarPersonaGestion(v), 350); }
   if (id === 'q') { st.f.q = e.target.value; st.f.limite = 60; clearTimeout(tBusqueda); tBusqueda = setTimeout(liviano() ? suscribirPagina : pintarLista, liviano() ? 400 : 150); }
   if (id === 'c-dni') {
     st.c.dniTxt = e.target.value;
@@ -2236,6 +2444,9 @@ document.addEventListener('change', async (e) => {
   }
   if (id === 'fx-foto' && e.target.files[0]) tomarFotoActa(e.target.files[0]);
   if (id === 'vv-file' && e.target.files[0]) subirVideoUI(e.target.files[0]);
+  if (id === 'g-periodo') { st.gest.periodo = e.target.value; st.gest.lista = []; suscribirGestiones(); pintarGestiones(); }
+  if (id === 'g-tipo') { st.gest.tipo = e.target.value; pintarGestiones(); }
+  if (id === 'g-por') { st.gest.por = e.target.value; pintarGestiones(); }
   if (id === 'gps-pantalla') { gps.pantalla = e.target.checked; if (gps.pantalla) pedirPantalla(); else soltarPantalla(); }
   if (id === 'imp-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'imp');
   if (id === 'fis-file' && e.target.files[0]) analizarImportacion(e.target.files[0], 'fis');

@@ -82,10 +82,11 @@ function resumirPadron(registros) {
   const c = {};
   for (const r of registros) {
     const x = (c[r.circuito || '–'] ||= { e: 0, esc: {} });
-    x.e++; x.esc[r.escuela] = (x.esc[r.escuela] || 0) + 1;
+    x.e++;
+    const y = (x.esc[r.escuela] ||= { e: 0, m: {} }); y.e++; y.m[r.mesa] = (y.m[r.mesa] || 0) + 1;
   }
   const out = {};
-  for (const k in c) out[k] = { e: c[k].e, esc: Object.entries(c[k].esc).map(([nm, e]) => ({ n: nm, e })) };
+  for (const k in c) out[k] = { e: c[k].e, esc: Object.entries(c[k].esc).map(([nm, y]) => ({ n: nm, e: y.e, m: y.m })) };
   return out;
 }
 
