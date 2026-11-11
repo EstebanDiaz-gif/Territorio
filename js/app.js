@@ -771,10 +771,10 @@ function vistaGestiones() {
   const g = st.gest;
   return `
     <button type="button" class="btn btn-full" data-act="g-nueva">${ic('mas')} Registrar gestión</button>
-    <div class="row wrap" style="gap:8px">
-      <select id="g-periodo" class="input grow" aria-label="Período">${periodos().map(([v, l]) => `<option value="${v}" ${g.periodo === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-      <select id="g-tipo" class="input grow" aria-label="Tipo de gestión"><option value="">Todas las gestiones</option>${tiposGestion().map((t) => `<option ${g.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
-      ${esMov() ? '' : `<select id="g-por" class="input grow" aria-label="A través de"><option value="">Todos los espacios</option>${[st.me, ...miEquipo()].map((u) => `<option value="${u.uid}" ${g.por === u.uid ? 'selected' : ''}>${esc(u.nombre)} · ${ROL_CORTO[u.rol]}</option>`).join('')}</select>`}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <select id="g-periodo" class="input" style="grid-column:1/-1" aria-label="Período">${periodos().map(([v, l]) => `<option value="${v}" ${g.periodo === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select id="g-tipo" class="input" style="${esMov() ? 'grid-column:1/-1' : ''}" aria-label="Tipo de gestión"><option value="">Gestión: todas</option>${tiposGestion().map((t) => `<option ${g.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      ${esMov() ? '' : `<select id="g-por" class="input" aria-label="Espacio"><option value="">Espacio: todos</option>${[st.me, ...miEquipo()].map((u) => `<option value="${u.uid}" ${g.por === u.uid ? 'selected' : ''}>${esc(u.nombre)} · ${ROL_CORTO[u.rol]}</option>`).join('')}</select>`}
     </div>
     <label class="search">${ic('buscar', 18)}<input id="g-q" type="search" placeholder="Buscar por nombre o DNI" value="${esc(g.q)}" aria-label="Buscar gestión"></label>
     <div id="g-resumen"></div>
