@@ -10,7 +10,8 @@ service firebase.storage {
       function esCabeza() { return miembro() && usuario().rol == 'cabeza'; }
       function deMiEquipo() {
         return esCabeza() || (miembro() && usuario().rol != 'fiscal'
-          && request.auth.uid in firestore.get(/databases/(default)/documents/campanias/$(cid)/personas/$(dni)).data.path);
+          && (request.auth.uid in firestore.get(/databases/(default)/documents/campanias/$(cid)/personas/$(dni)).data.path
+            || request.auth.uid in firestore.get(/databases/(default)/documents/campanias/$(cid)/personas/$(dni)).data.get('pathsDisputa', [])));
       }
       allow read: if deMiEquipo();
       allow create, update: if deMiEquipo()

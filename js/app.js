@@ -67,7 +67,7 @@ function conteo(clave, filtros, ttl = 45000) {
 }
 const fmtN = (n) => (n == null ? '…' : Number(n).toLocaleString('es-AR'));
 function statsGlobal() {
-  if (!liviano()) return stats(st.personas);
+  if (!liviano()) return stats(propias(st.personas));
   return {
     total: conteo('total', []), conf: conteo('conf', [['estado', '==', 'confirmado']]), tras: conteo('tras', [['estado', '==', 'traslado']]),
     voto: conteo('voto', [['voto', '==', true]]), rev: conteo('rev', [['revisar', '==', true]]),
@@ -76,15 +76,24 @@ function statsGlobal() {
 }
 // [cargados, votaron] de alguien y todo su equipo
 const contU = (cont, uid) => (liviano() ? [conteo('u' + uid, [['path', 'array-contains', uid]]), conteo('uv' + uid, [['path', 'array-contains', uid], ['voto', '==', true]])] : (cont[uid] || [0, 0]));
+// ----- Personas "en disputa": dos dirigentes la cargaron; cuenta una vez y se la lleva el primero que marca "Ya votó"
+const enDisputa = (p) => !!(p?.disputa && Object.keys(p.disputa).length);
+const ajena = (p) => st.me.rol !== 'cabeza' && !(p.path || []).includes(st.me.uid);
+const propias = (lista) => (st.me.rol === 'cabeza' ? lista : lista.filter((p) => !ajena(p)));
+const nombresDisputa = (p) => [p.ownerNombre, ...Object.values(p.disputa || {}).map((d) => d.nombre)];
 async function actualizarPersonaApp(dni, cambios) {
+  const p0 = personaLocal(dni);
+  if (cambios.voto === true && enDisputa(p0)) cambios = { ...cambios, ...S.cierreVoto(p0) };
   const r = await S.actualizarPersona(dni, cambios);
-  const p = personaLocal(dni); if (p) Object.assign(p, cambios);
+  const p = personaLocal(dni);
+  if (p) { Object.assign(p, cambios); if ('disputa' in cambios) { delete p.disputa; delete p.pathsDisputa; delete p.enDisputa; } }
   invalidarConteos(); programarRefresco();
   return r;
 }
 function filtrosGente() {
   const f = []; const e = st.f.estado;
   if (e === 'fiscal') f.push(['tipo', 'in', ['fiscal', 'fiscal_suplente']]);
+  else if (e === 'disputa') f.push(['enDisputa', '==', true]);
   else if (e === 'revisar') f.push(['revisar', '==', true]);
   else if (e !== 'todos') f.push(['estado', '==', e]);
   const q = st.f.q.trim(); const qd = normDni(q);
@@ -361,7 +370,7 @@ function pintarTop() {
       <div class="kpi"><b class="v-ok">${fmtN(s.conf)}</b><span>confirm.</span></div>
       <div class="kpi"><b class="v-warn">${fmtN(s.tras)}</b><span>traslado</span></div>
       <div class="kpi"><b>${fmtN(s.voto)}</b><span>votaron</span></div>
-    </div>`;
+    </div>${(() => { const n = liviano() ? 0 : st.personas.filter(ajena).length; return n ? `<div class="top-sub" style="margin-top:6px">+ ${fmtN(n)} en disputa con otro equipo (no suman hasta que voten)</div>` : ''; })()}`;
   } else if (st.tab === 'dia') {
     extra = `<div class="row" style="justify-content:space-between;align-items:baseline">
         <span class="top-sub">Ya votaron</span>
@@ -390,13 +399,13 @@ function refrescarPartes() {
   if (st.tab === 'dia') pintarDia();
   if (st.tab === 'equipo') pintarEquipo();
   if (st.tab === 'gestiones') pintarGestiones();
-  if (st.tab === 'panel') { cargarResumen(); pintarTablero(); pintarFiscalizacion(); pintarConflictos(); }
+  if (st.tab === 'panel') { cargarResumen(); pintarTablero(); pintarFiscalizacion(); pintarConflictos(); pintarDisputas(); }
 }
 
 // ---------------------------------------------------------------- GENTE
 function vistaGente() {
   const equipo = miEquipo();
-  const filtros = [['todos', 'Todos'], ['confirmado', 'Confirmados'], ['traslado', 'Traslado'], ['dudoso', 'Dudosos'], ['sin', 'Sin contactar'], ['fiscal', 'Fiscales'], ['revisar', 'A revisar']];
+  const filtros = [['todos', 'Todos'], ['confirmado', 'Confirmados'], ['traslado', 'Traslado'], ['dudoso', 'Dudosos'], ['sin', 'Sin contactar'], ['fiscal', 'Fiscales'], ['revisar', 'A revisar'], ...(st.me.disputas || st.personas.some(enDisputa) ? [['disputa', 'En disputa']] : [])];
   return `
     <label class="search">${ic('buscar', 18)}<input id="q" type="search" placeholder="Buscar por nombre, DNI o escuela" value="${esc(st.f.q)}" aria-label="Buscar"></label>
     ${esMov() ? '' : `<select id="de" class="input" aria-label="Ver gente de">
@@ -411,11 +420,12 @@ function filtrarGente() {
   const q = sinAcentos(st.f.q).trim();
   const qd = normDni(st.f.q);
   return st.personas.filter((p) => {
-    if (st.f.de && !p.path.includes(st.f.de)) return false;
     const e = st.f.estado;
+    if (st.f.de && !p.path.includes(st.f.de) && !(e === 'disputa' && (p.pathsDisputa || []).includes(st.f.de))) return false;
+    if (e === 'disputa' && !enDisputa(p)) return false;
     if (e === 'fiscal' && !(p.tipo && p.tipo !== 'votante')) return false;
     if (e === 'revisar' && !p.revisar) return false;
-    if (!['todos', 'fiscal', 'revisar'].includes(e) && p.estado !== e) return false;
+    if (!['todos', 'fiscal', 'revisar', 'disputa'].includes(e) && p.estado !== e) return false;
     if (q) {
       const hay = sinAcentos(`${p.nombre} ${p.escuela} ${p.ownerNombre} ${p.domicilio}`);
       if (!(hay.includes(q) || (qd.length >= 3 && p.dni.includes(qd)))) return false;
@@ -430,6 +440,7 @@ function tarjetaPersona(p) {
   if (p.tipo && p.tipo !== 'votante') tags.push(`<span class="pill p-acc">${esc(TIPO_LABEL[p.tipo])}</span>`);
   if (p.revisar) tags.push('<span class="pill p-warn">Revisar</span>');
   if (p.video) tags.push('<span class="pill p-ok">Video ✓</span>');
+  if (enDisputa(p)) tags.unshift('<span class="pill p-bad">En disputa</span>');
   const mio = p.ownerId === st.me.uid;
   const wa = waUrl(p.tel, textoRecordatorio(p));
   return `<div class="row">
@@ -437,7 +448,7 @@ function tarjetaPersona(p) {
       <div class="grow">
         <div class="n">${esc(p.nombre)}</div>
         <div class="d num">DNI ${fmtDni(p.dni)}${p.escuela ? ' · ' + esc(p.escuela) : ''}${p.mesa ? ' · Mesa ' + esc(p.mesa) : ''}</div>
-        ${mio ? '' : `<div class="d">de ${esc(p.ownerNombre)}</div>`}
+        ${enDisputa(p) ? `<div class="d">${esc(nombresDisputa(p).join(' / '))}</div>` : (mio ? '' : `<div class="d">de ${esc(p.ownerNombre)}</div>`)}
         <div class="tags">${tags.join('')}</div>
       </div>
     </button>
@@ -472,6 +483,7 @@ function hojaPersona(dni, confirmarBorrado = false) {
   const p = personaLocal(dni);
   if (moduloGestiones()) setTimeout(() => pintarGestionesPersona(dni), 0);
   if (!p) { cerrarHoja(); return; }
+  if (ajena(p)) { hojaPersonaAjena(p); return; }
   const destinos = esMov() ? [] : [st.me, ...miEquipo()].filter((u) => u.uid !== p.ownerId);
   const wa = waUrl(p.tel, textoRecordatorio(p));
   const html = `
@@ -480,6 +492,7 @@ function hojaPersona(dni, confirmarBorrado = false) {
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button>
     </div>
     ${p.revisar ? `<div class="aviso warn">${ic('alerta', 18)}<span>${esc(p.nota || 'Hay datos para revisar')}</span></div>` : ''}
+    ${htmlDisputa(p)}
     <div class="card pad stack">
       <dl class="ficha" style="margin:0">
         <div class="full"><dt>Escuela</dt><dd>${esc(p.escuela || 'Sin dato')}</dd>${p.dirEscuela ? `<div class="muted">${esc(p.dirEscuela)}</div>` : ''}</div>
@@ -523,6 +536,41 @@ function hojaPersona(dni, confirmarBorrado = false) {
   if (sheetCtx?.dni === dni) hojaHtml(html); else abrirHoja(html, { tipo: 'persona', dni });
 }
 
+function htmlDisputa(p) {
+  if (!enDisputa(p)) return '';
+  const otros = Object.entries(p.disputa);
+  const cab = st.me.rol === 'cabeza';
+  return `<div class="card pad stack" style="border:2px solid var(--bad)">
+    <div class="row"><span class="pill p-bad">En disputa</span><b class="grow">La cargaron ${otros.length + 1} dirigentes</b></div>
+    <div class="small">${[`<b>${esc(p.ownerNombre)}</b> (la cargó primero)`, ...otros.map(([, d]) => `<b>${esc(d.nombre)}</b>`)].join(' · ')}</div>
+    <div class="muted small">Cuenta una sola vez. Se la lleva el primero que marque <b>Ya votó</b>${moduloVideo() ? ' o suba el video' : ''}.</div>
+    ${cab ? `<div class="label" style="margin:4px 0 0">O decidí vos con quién queda</div>
+      <div class="row wrap" style="gap:8px">${[[p.ownerId, p.ownerNombre], ...otros.map(([uid, d]) => [uid, d.nombre])].map(([uid, n]) => `<button type="button" class="btn btn-sec btn-sm" data-act="disp-dejar" data-dni="${p.dni}" data-uid="${uid}">Dejar con ${esc(primerNombre(n))}</button>`).join('')}</div>` : ''}
+  </div>`;
+}
+// Ficha de alguien que es de otro equipo pero mi equipo también tiene "en disputa": solo se puede marcar que votó
+function hojaPersonaAjena(p) {
+  const html = `
+    <div class="row">
+      <div class="grow"><h2>${esc(p.nombre)}</h2><div class="muted num">DNI ${fmtDni(p.dni)}</div></div>
+      <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button>
+    </div>
+    ${htmlDisputa(p)}
+    <div class="card pad stack">
+      <dl class="ficha" style="margin:0">
+        <div class="full"><dt>Escuela</dt><dd>${esc(p.escuela || 'Sin dato')}</dd>${p.dirEscuela ? `<div class="muted">${esc(p.dirEscuela)}</div>` : ''}</div>
+        <div><dt>Mesa</dt><dd class="big">${esc(p.mesa || '–')}</dd></div>
+        <div><dt>Orden</dt><dd class="big">${esc(p.orden || '–')}</dd></div>
+      </dl>
+      ${p.escuela ? `<a class="btn btn-sec btn-sm" href="${mapsUrl(p)}" target="_blank" rel="noopener">${ic('mapa', 18)} Cómo llegar a la escuela</a>` : ''}
+      ${casaUrl(p.domicilio) ? `<a class="btn btn-sec btn-sm" href="${casaUrl(p.domicilio)}" target="_blank" rel="noopener">${ic('casa', 18)} Ir a su casa</a>` : ''}
+    </div>
+    ${htmlVideoVoto(p)}
+    ${videoExigido() ? '' : `<button type="button" class="btn btn-full" data-act="p-voto">Marcar que ya votó (queda en tu equipo)</button>`}
+    <div class="muted small">Mientras esté en disputa no podés cambiar sus datos: los maneja quien la cargó primero.</div>`;
+  if (sheetCtx?.dni === p.dni) hojaHtml(html); else abrirHoja(html, { tipo: 'persona', dni: p.dni });
+}
+
 // ---------------------------------------------------------------- CARGAR
 function vistaCargar() {
   return `
@@ -533,7 +581,7 @@ function vistaCargar() {
         <button type="button" class="btn" data-act="c-buscar" style="min-height:52px">Buscar</button>
       </div>
       <div class="muted small">Con o sin puntos. Al buscar se completan los datos del padrón.</div>
-      ${DEMO ? '<div class="muted small demo-tip">Para probar: <b>38512004</b> (libre) · <b>22731880</b> (ya es de otro movilizador) · <b>12345678</b> (no está en el padrón)</div>' : ''}
+      ${DEMO ? '<div class="muted small demo-tip">Para probar: <b>38512004</b> (libre) · <b>22731880</b> (ya es de otro movilizador: se puede cargar en disputa) · <b>12345678</b> (no está en el padrón)</div>' : ''}
     </div>
     <div id="c-res" class="stack">${resultadoCargar()}</div>`;
 }
@@ -548,6 +596,23 @@ function resultadoCargar() {
     const p = c.persona;
     return `<div class="card pad stack">
       <div class="aviso info">${ic('ok', 18)}<span>Ya está en tu equipo${p.ownerId === st.me.uid ? ', cargada por vos' : ', es de ' + esc(p.ownerNombre)}.</span></div>
+      <h3>${esc(p.nombre)}</h3><div class="muted">${esc(p.escuela || '')}${p.mesa ? ' · Mesa ' + esc(p.mesa) : ''}</div>
+      <button class="btn btn-sec" data-act="ver" data-dni="${p.dni}">Ver ficha</button>
+    </div>`;
+  }
+  if (c.fase === 'disputable') {
+    return `<div class="card pad stack">
+        <div class="row"><span class="pill p-bad">Ya está cargada</span></div>
+        <h3>${esc(c.padron?.nombre || 'DNI ' + fmtDni(c.dni))}</h3>
+        <div>La cargó otro dirigente de la campaña. Podés cargarla igual <b>en disputa</b>: les aparece a los dos, cuenta una sola vez y se la lleva el primero que marque que votó.</div>
+        <button class="btn btn-full" data-act="c-disputar">Cargarla en disputa</button>
+        <button class="btn btn-ghost" data-act="c-otro">Cargar otro DNI</button>
+      </div>`;
+  }
+  if (c.fase === 'endisputa') {
+    const p = c.persona;
+    return `<div class="card pad stack">
+      <div class="aviso warn">${ic('alerta', 18)}<span>Ya la tenés en disputa con otro equipo.</span></div>
       <h3>${esc(p.nombre)}</h3><div class="muted">${esc(p.escuela || '')}${p.mesa ? ' · Mesa ' + esc(p.mesa) : ''}</div>
       <button class="btn btn-sec" data-act="ver" data-dni="${p.dni}">Ver ficha</button>
     </div>`;
@@ -623,6 +688,8 @@ async function buscarDni() {
     const [cons, padron] = await Promise.all([S.consultarPersona(dni), S.buscarPadron(dni).catch(() => null)]);
     if (buscandoDni !== dni) return;
     if (cons.estado === 'propia') Object.assign(st.c, { fase: 'propia', persona: cons.persona });
+    else if (cons.estado === 'disputa') Object.assign(st.c, { fase: 'endisputa', persona: cons.persona });
+    else if (cons.estado === 'ocupada' && st.me.disputas) Object.assign(st.c, { fase: 'disputable', padron });
     else if (cons.estado === 'ocupada') {
       const r = await S.cargarPersona({ dni, nombre: padron?.nombre || '' }); // registra el intento
       Object.assign(st.c, { fase: 'ocupada', conflictoId: r.id });
@@ -655,6 +722,8 @@ async function guardarCarga() {
     const r = await S.cargarPersona(datos, dueno);
     if (r.conflicto) { Object.assign(st.c, { fase: 'ocupada', conflictoId: r.id }); pintarCargar(); return; }
     if (r.yaEnEquipo) { Object.assign(st.c, { fase: 'propia', persona: r.persona }); pintarCargar(); return; }
+    if (r.yaEnDisputa) { Object.assign(st.c, { fase: 'endisputa', persona: r.persona }); pintarCargar(); return; }
+    if (r.ocupada) { Object.assign(st.c, { fase: 'disputable', padron: c.padron }); pintarCargar(); return; }
     toast(r.pendiente ? `${primerNombre(nombre)} quedó guardada. Se sincroniza cuando haya señal.` : `${primerNombre(nombre)} quedó en ${dueno.uid === st.me.uid ? 'tu lista' : 'la lista de ' + dueno.nombre}`);
     st.c = { fase: 'inicio' };
     $('#c-dni').value = '';
@@ -673,13 +742,13 @@ function pintarDia() {
   const el = $('#dia');
   if (!el) return;
   if (liviano()) { pintarDiaCabeza(el); return; }
-  const s = stats(st.personas);
+  const s = stats(propias(st.personas));
   const traslados = st.personas.filter((p) => p.estado === 'traslado' && !p.voto);
   const lista = st.personas.filter((p) => st.dia.solo === 'todos' || !p.voto);
   const grupos = {};
   for (const p of lista) (grupos[p.escuela || 'Sin escuela asignada'] ||= []).push(p);
   const totEsc = {};
-  for (const p of st.personas) { const k = p.escuela || 'Sin escuela asignada'; totEsc[k] ||= [0, 0]; totEsc[k][0]++; if (p.voto) totEsc[k][1]++; }
+  for (const p of propias(st.personas)) { const k = p.escuela || 'Sin escuela asignada'; totEsc[k] ||= [0, 0]; totEsc[k][0]++; if (p.voto) totEsc[k][1]++; }
   const orden = Object.keys(grupos).sort((a, b) => a.localeCompare(b));
   el.innerHTML = `
     ${htmlMiUbicacion()}
@@ -699,12 +768,12 @@ function pintarDia() {
     ${st.personas.length && !lista.length ? `<div class="aviso ok">${ic('ok', 18)}<span>¡Votaron todos!</span></div>` : ''}
     ${orden.map((esc_) => {
       const ps = grupos[esc_].sort((a, b) => String(a.mesa).localeCompare(String(b.mesa)) || (+a.orden || 0) - (+b.orden || 0));
-      const [tot, vot] = totEsc[esc_];
+      const [tot, vot] = totEsc[esc_] || [0, 0];
       return `<div class="card">
         <div class="escuela-h"><div class="grow"><h3>${esc(esc_)}</h3><div class="muted small">${esc(ps[0].dirEscuela || '')}${ps[0].dirEscuela ? ' · ' : ''}${vot} de ${tot} votaron</div></div>
           ${ps[0].escuela ? `<a class="btn btn-sec btn-sm" href="${mapsUrl(ps[0])}" target="_blank" rel="noopener">${ic('mapa', 16)} Ir</a>` : ''}</div>
         ${ps.map((p) => `<div class="votante">
-          <div class="grow"><div style="font-weight:600">${esc(p.nombre)}</div>
+          <div class="grow"><div style="font-weight:600">${esc(p.nombre)}${enDisputa(p) ? ' <span class="pill p-bad">En disputa</span>' : ''}</div>
           <div class="muted small num">Mesa ${esc(p.mesa || '–')} · orden ${esc(p.orden || '–')}${p.ownerId !== st.me.uid ? ' · de ' + esc(p.ownerNombre) : ''}</div></div>
           ${!p.voto && casaUrl(p.domicilio) ? `<a class="icon-btn" href="${casaUrl(p.domicilio)}" target="_blank" rel="noopener" aria-label="Ir a la casa de ${esc(p.nombre)}">${ic('casa')}</a>` : ''}
           <button class="btn-voto ${p.voto ? 'si' : ''}" data-act="voto" data-dni="${p.dni}" aria-pressed="${!!p.voto}">${p.voto ? (p.video ? '✓ Votó 🎥' : '✓ Votó') : 'Ya votó'}</button>
@@ -918,7 +987,7 @@ function htmlVideoVoto(p) {
     <label class="check"><input type="checkbox" id="vv-ok"> La persona aceptó los <a href="${TERMINOS_VIDEO()}" target="_blank" rel="noopener">términos del video</a>.</label>
     <div class="row wrap">
       <label class="btn grow" for="vv-file" id="vv-subir">${ic('video', 18)} Subir video</label>
-      <button type="button" class="btn btn-sec grow" data-act="vv-link">${ic('qr', 18)} Mandarle link / QR</button>
+      ${ajena(p) || enDisputa(p) ? "" : `<button type="button" class="btn btn-sec grow" data-act="vv-link">${ic("qr", 18)} Mandarle link / QR</button>`}
     </div>
     <div class="muted small">Si te lo mandó por WhatsApp, guardalo y elegilo de la galería.</div>
     <input id="vv-file" type="file" accept="video/*" hidden>
@@ -946,8 +1015,10 @@ async function subirVideoUI(archivo) {
   vv.archivo = archivo; vv.dni = dni;
   res.innerHTML = '<div class="muted small" id="vv-txt">Subiendo video…</div><div class="progreso"><i id="vv-prog"></i></div>';
   try {
-    await S.subirVideoVoto(dni, archivo, (h, t) => { const b = $('#vv-prog'); if (b) b.style.width = pct(h, t) + '%'; const x = $('#vv-txt'); if (x) x.textContent = `Subiendo video… ${pct(h, t)}%`; });
+    const disp = enDisputa(p) ? S.cierreVoto(p) : null;
+    await S.subirVideoVoto(dni, archivo, (h, t) => { const b = $('#vv-prog'); if (b) b.style.width = pct(h, t) + '%'; const x = $('#vv-txt'); if (x) x.textContent = `Subiendo video… ${pct(h, t)}%`; }, p);
     Object.assign(p, { voto: true, votoAt: Date.now(), conVideo: true, video: { path: '', tam: archivo.size, at: Date.now(), por: st.me.uid } });
+    if (disp) { if (disp.ownerId) Object.assign(p, { ownerId: disp.ownerId, ownerNombre: disp.ownerNombre, path: disp.path }); delete p.disputa; delete p.pathsDisputa; delete p.enDisputa; }
     vv.archivo = null; invalidarConteos(); programarRefresco();
     toast(`Video subido · ${primerNombre(p.nombre)} quedó como que votó`);
     hojaPersona(dni);
@@ -1381,6 +1452,7 @@ function vistaPanel() {
     <div id="tablero" class="stack"></div>
     <div id="fiscalizacion" class="stack"></div>
     <div id="conflictos"></div>
+    <div id="disputas"></div>
     <div class="sec-title"><h2>Herramientas</h2></div>
     <div class="stack" style="gap:8px">
       ${herr('gente', 'gente', 'Cargar lista de gente', 'Excel, CSV o Word de tu equipo', `
@@ -1412,6 +1484,11 @@ function vistaPanel() {
         <a class="btn btn-ghost" href="${TERMINOS_VIDEO()}" target="_blank" rel="noopener">Ver los términos del video</a>
         <div class="muted small">Después de la elección, borrá los videos. Así lo dicen los términos.</div>
         <button type="button" class="btn btn-bad" data-act="vv-borrar-todos">Borrar todos los videos</button>`) : ''}
+      ${st.me.rol === 'cabeza' ? herr('disp', 'gente', 'Personas en disputa', 'Si dos dirigentes cargan al mismo DNI', `
+        <div class="muted">Si está permitido, cuando alguien carga un DNI que ya es de otro dirigente puede cargarlo <b>en disputa</b>. Le aparece a los dos con la marca “En disputa”, cuenta <b>una sola vez</b> en los totales y se la lleva el primero que marque <b>Ya votó</b>. Vos podés decidir antes con quién queda.</div>
+        <div class="muted small">Si no se permite, el DNI queda bloqueado para el segundo y el intento te llega como conflicto.</div>
+        <div class="row"><span class="grow">¿Permitir cargar en disputa?</span>
+          <button type="button" class="chip" data-act="disp-opcion" aria-pressed="${!!st.me.disputas}">${st.me.disputas ? 'Sí, se permite' : 'No, se bloquea'}</button></div>`) : ''}
       ${st.me.rol === 'cabeza' ? herr('alertas', 'alerta', 'Alertas del Día E', 'Avisar si alguien moviliza poco', htmlConfigAlertas()) : ''}
       ${herr('excel', 'bajar', 'Descargar Excel', 'Toda la gente de tu equipo', `
         <button class="btn btn-sec" data-act="exportar">${ic('bajar')} Descargar Excel</button>`)}
@@ -1433,7 +1510,7 @@ function pintarTablero() {
   if (!el) return;
   const s = statsGlobal();
   const porCirc = {};
-  if (!liviano()) for (const p of st.personas) { const k = p.circuito || '–'; porCirc[k] ||= [0, 0]; porCirc[k][0]++; if (p.voto) porCirc[k][1]++; }
+  if (!liviano()) for (const p of propias(st.personas)) { const k = p.circuito || '–'; porCirc[k] ||= [0, 0]; porCirc[k][0]++; if (p.voto) porCirc[k][1]++; }
   const rolRanking = st.me.rol === 'cabeza' ? 'encargado' : rolAbajo(st.me.rol);
   const cont = liviano() ? {} : conteoPorUsuario();
   const ranking = st.usuarios.filter((u) => u.rol === rolRanking && (st.me.rol === 'cabeza' || u.parentId === st.me.uid))
@@ -1483,7 +1560,7 @@ function bloqueCircuitos(porCirc) {
     if (!abierto) return html;
     const escs = {};
     if (lv) for (const r of res[k]?.esc || []) escs[r.n] = { n: conteo('e' + k + r.n, [['circuito', '==', k], ['escuela', '==', r.n]]), v: conteo('ev' + k + r.n, [['circuito', '==', k], ['escuela', '==', r.n], ['voto', '==', true]]), e: 0 };
-    if (!lv) for (const p of st.personas) {
+    if (!lv) for (const p of propias(st.personas)) {
       if ((p.circuito || '–') !== k) continue;
       const x = (escs[p.escuela || 'Sin escuela'] ||= { n: 0, v: 0, e: 0 });
       x.n++; if (p.voto) x.v++;
@@ -1511,7 +1588,7 @@ function bloqueCircuitos(porCirc) {
 function tablaMesas(k, nm, electores) {
   const lv = liviano(); const mesas = {};
   for (const [m, e] of Object.entries(electores)) mesas[m] = { e, n: 0, v: 0 };
-  if (!lv) for (const p of st.personas) {
+  if (!lv) for (const p of propias(st.personas)) {
     if ((p.circuito || '–') !== k || (p.escuela || 'Sin escuela') !== nm || !p.mesa) continue;
     const x = (mesas[p.mesa] ||= { e: 0, n: 0, v: 0 }); x.n++; if (p.voto) x.v++;
   }
@@ -1556,6 +1633,27 @@ function pintarConflictos() {
           : `<div class="muted small">Esta persona ya no está cargada.</div><button class="btn btn-sec btn-sm" data-act="conf-no" data-id="${c.id}">Quitar de la lista</button>`) : ''}
       </div>`;
     }).join('')}</div>`;
+}
+
+// ----- personas en disputa (resumen en el Panel)
+let disputasCache = { at: 0, lista: null };
+function pintarDisputas() {
+  const el = $('#disputas');
+  if (!el) return;
+  let lista;
+  if (liviano()) {
+    if (Date.now() - disputasCache.at > 60000) {
+      disputasCache.at = Date.now();
+      S.listarPersonas([['enDisputa', '==', true]], 50).then((x) => { disputasCache.lista = x; pintarDisputas(); }).catch(() => {});
+    }
+    lista = disputasCache.lista || [];
+  } else lista = st.personas.filter(enDisputa);
+  if (!lista.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="sec-title"><h2>En disputa</h2><span class="pill p-bad">${lista.length}${lista.length >= 50 && liviano() ? '+' : ''}</span></div>
+    <div class="muted small" style="margin:4px 0 10px">Personas que cargó más de un dirigente. Cuentan una vez; se las lleva el primero que marque que votó.</div>
+    <div class="stack">${lista.slice(0, 30).map((p) => `<button type="button" class="card pad persona" data-act="ver-disp" data-dni="${p.dni}" style="text-align:left">
+      <div class="grow"><b>${esc(p.nombre)}</b> <span class="muted small num">DNI ${fmtDni(p.dni)}</span>
+      <div class="muted small">${esc(nombresDisputa(p).join(' / '))}</div></div></button>`).join('')}</div>`;
 }
 
 // ----- importar planilla de personas
@@ -2153,6 +2251,27 @@ const acciones = {
   'c-buscar': buscarDni,
   'c-estado': (el) => { st.c.estado = el.dataset.v; document.querySelectorAll('[data-act=c-estado]').forEach((b) => b.setAttribute('aria-pressed', b === el)); },
   'c-guardar': guardarCarga,
+  'c-disputar': async (el) => {
+    el.disabled = true;
+    try {
+      await S.disputarPersona(st.c.dni);
+      toast(`${primerNombre(st.c.padron?.nombre || 'La persona')} quedó en disputa en tu lista`);
+      st.c = { fase: 'inicio' }; $('#c-dni').value = ''; pintarCargar(); $('#c-dni').focus();
+    } catch (e) {
+      el.disabled = false;
+      toast(e.code === 'permission-denied' || e.code === 'not-found' ? 'No se pudo: ya votó o la campaña no permite disputas' : mensajeError(e));
+    }
+  },
+  'disp-dejar': async (el) => {
+    const u = usuarioPorId(el.dataset.uid); const dni = el.dataset.dni;
+    if (!u) { toast('Esa persona ya no está en el equipo'); return; }
+    try { await S.dejarCon(dni, u); const p = personaLocal(dni); if (p) { Object.assign(p, { ownerId: u.uid, ownerNombre: u.nombre, path: u.path }); delete p.disputa; delete p.pathsDisputa; delete p.enDisputa; } invalidarConteos(); programarRefresco(); toast(`Queda con ${u.nombre}`); hojaPersona(dni); } catch (e) { toast(mensajeError(e)); }
+  },
+  'ver-disp': (el) => { const dni = el.dataset.dni; if (!personaLocal(dni)) { const p = (disputasCache.lista || []).find((x) => x.dni === dni); if (p) recordar([p]); } hojaPersona(dni); },
+  'disp-opcion': async (el) => {
+    const v = !st.me.disputas;
+    try { await S.guardarDisputas(v); st.me.disputas = v; el.textContent = v ? 'Sí, se permite' : 'No, se bloquea'; el.setAttribute('aria-pressed', v); toast(v ? 'Desde ahora se puede cargar en disputa' : 'Ya no se puede cargar en disputa'); } catch (e) { toast(mensajeError(e)); }
+  },
   'c-otro': () => { st.c = { fase: 'inicio' }; $('#c-dni').value = ''; pintarCargar(); $('#c-dni').focus(); },
   'c-reclamar': async () => {
     const motivo = $('#c-motivo').value.trim();

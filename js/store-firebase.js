@@ -60,7 +60,7 @@ async function cargarMe(uid) {
   if (!activo) throw Object.assign(new Error('Tu usuario fue dado de baja de la campaña. Pedile a quien te suma que te vuelva a agregar.'), { code: 'sin-campania' });
   const u = await getDoc(D('usuarios', uid));
   const camp = await getDoc(doc(db, 'campanias', cid));
-  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [], alertas: camp.data()?.alertas || null, videoVoto: !!camp.data()?.videoVoto, modulos: camp.data()?.modulos || {}, tiposGestion: camp.data()?.tiposGestion || null, espacios: camp.data()?.espacios || [] };
+  me = { ...u.data(), uid, campania: camp.data()?.nombre || '', listas: camp.data()?.listas || [], categorias: camp.data()?.categorias || [], alertas: camp.data()?.alertas || null, videoVoto: !!camp.data()?.videoVoto, modulos: camp.data()?.modulos || {}, tiposGestion: camp.data()?.tiposGestion || null, espacios: camp.data()?.espacios || [], disputas: !!camp.data()?.disputas };
   return me;
 }
 
@@ -263,13 +263,46 @@ export function padronCantidad() { return null; }
 
 // ---------- Personas ----------
 export function watchPersonas(cb) {
-  return onSnapshot(deMiEquipo('personas'), (s) => cb(s.docs.map((d) => d.data())), (e) => console.error(e));
+  if (me.rol === 'cabeza') return onSnapshot(C('personas'), (s) => cb(s.docs.map((d) => d.data())), (e) => console.error(e));
+  // Las de mi equipo + las que mi equipo tiene "en disputa" con otro (una sola vez cada una)
+  let propias = []; let disputadas = [];
+  const emitir = () => { const m = new Map(); for (const p of [...disputadas, ...propias]) m.set(p.dni, p); cb([...m.values()]); };
+  const a = onSnapshot(deMiEquipo('personas'), (s) => { propias = s.docs.map((d) => d.data()); emitir(); }, (e) => console.error(e));
+  const b = onSnapshot(query(C('personas'), where('pathsDisputa', 'array-contains', me.uid)), (s) => { disputadas = s.docs.map((d) => d.data()); emitir(); }, (e) => console.error(e));
+  return () => { a(); b(); };
+}
+// ---------- Personas en disputa ----------
+const esMia = (p) => me.rol === 'cabeza' || (p.path || []).includes(me.uid);
+// Me sumo como otro dirigente que también la tiene (sin poder ver ni tocar lo del dueño)
+export function disputarPersona(dni) {
+  return sinTrabar(updateDoc(D('personas', dni), {
+    ['disputa.' + me.uid]: { nombre: me.nombre, path: me.path, at: Date.now() },
+    pathsDisputa: arrayUnion(...me.path), enDisputa: true, actualizadoAt: serverTimestamp()
+  }));
+}
+// Campos extra al marcar "Ya votó": la disputa se cierra a favor de quien la marca
+export function cierreVoto(p) {
+  if (!p?.disputa) return {};
+  const fin = { disputa: deleteField(), pathsDisputa: deleteField(), enDisputa: deleteField() };
+  if (esMia(p)) return fin;
+  const [uid, d] = Object.entries(p.disputa).find(([, x]) => (x.path || []).includes(me.uid)) || [];
+  if (!uid) return fin;
+  return { ...fin, ownerId: uid, ownerNombre: d.nombre, path: d.path };
+}
+// Una cabeza decide con quién queda
+export function dejarCon(dni, u) {
+  return sinTrabar(updateDoc(D('personas', dni), { ownerId: u.uid, ownerNombre: u.nombre, path: u.path, disputa: deleteField(), pathsDisputa: deleteField(), enDisputa: deleteField(), actualizadoAt: serverTimestamp() }));
+}
+export function guardarDisputas(v) {
+  me.disputas = !!v;
+  return sinTrabar(updateDoc(doc(db, 'campanias', cid), { disputas: !!v }));
 }
 
 export async function consultarPersona(dni) {
   try {
     const s = await getDoc(D('personas', dni));
     if (!s.exists()) return { estado: 'libre' };
+    if (!esMia(s.data())) return { estado: 'disputa', persona: s.data() };
     return { estado: 'propia', persona: s.data() };
   } catch (e) {
     if (e.code === 'permission-denied') return { estado: 'ocupada' };
@@ -281,6 +314,8 @@ export async function consultarPersona(dni) {
 export async function cargarPersona(datos, dueno = me) {
   const c = await consultarPersona(datos.dni);
   if (c.estado === 'propia') return { yaEnEquipo: true, persona: c.persona };
+  if (c.estado === 'disputa') return { yaEnDisputa: true, persona: c.persona };
+  if (c.estado === 'ocupada' && me.disputas) return { ocupada: true };
   if (c.estado === 'ocupada') return { conflicto: true, id: await registrarConflicto(datos.dni) };
   const p = {
     estado: 'sin', tipo: 'votante', tel: '', nota: '', revisar: false,
@@ -292,7 +327,7 @@ export async function cargarPersona(datos, dueno = me) {
     return await sinTrabar(setDoc(D('personas', datos.dni), p));
   } catch (e) {
     // Alguien lo cargó justo antes que nosotros
-    if (e.code === 'permission-denied') return { conflicto: true, id: await registrarConflicto(datos.dni) };
+    if (e.code === 'permission-denied') return me.disputas ? { ocupada: true } : { conflicto: true, id: await registrarConflicto(datos.dni) };
     throw e;
   }
 }
@@ -373,14 +408,14 @@ async function almacen() {
   modStorage ||= await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js');
   return { m: modStorage, s: modStorage.getStorage(app) };
 }
-export async function subirVideoVoto(dni, archivo, onProgreso) {
+export async function subirVideoVoto(dni, archivo, onProgreso, persona) {
   const { m, s } = await almacen();
   const ext = ((archivo.name || '').split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'mp4';
   const path = `campanias/${cid}/videos/${dni}/voto.${ext}`;
   const tarea = m.uploadBytesResumable(m.ref(s, path), archivo, { contentType: archivo.type || 'video/mp4' });
   await new Promise((res, rej) => tarea.on('state_changed', (x) => onProgreso?.(x.bytesTransferred, x.totalBytes), rej, res));
   const ahora = Date.now();
-  await updateDoc(D('personas', dni), { video: { path, tam: archivo.size, at: ahora, por: me.uid }, conVideo: true, voto: true, votoAt: ahora, actualizadoAt: serverTimestamp() });
+  await updateDoc(D('personas', dni), { video: { path, tam: archivo.size, at: ahora, por: me.uid }, conVideo: true, voto: true, votoAt: ahora, ...cierreVoto(persona), actualizadoAt: serverTimestamp() });
 }
 export async function urlVideoVoto(p) {
   const { m, s } = await almacen();

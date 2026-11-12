@@ -60,7 +60,7 @@ export async function init() {
 // En la demo, si no se configuraron alertas, se muestran unas de ejemplo con la fecha de hoy
 const hoyDemo = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const alertasDemo = () => ({ fecha: hoyDemo(), minimo: 5, pasos: [{ hora: '08:00', pct: 40, niveles: 1 }, { hora: '12:00', pct: 50, niveles: 2 }, { hora: '15:00', pct: 60, niveles: 99 }] });
-const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [], alertas: db.campania.alertas || alertasDemo(), videoVoto: !!db.campania.videoVoto, modulos: { video: true, gestiones: true }, tiposGestion: db.campania.tiposGestion || null, espacios: db.campania.espacios || ['Agrupación Centro', 'Agrupación Barrio Norte', 'Juventud'] });
+const conCampania = (u) => ({ ...u, campania: db.campania.nombre, listas: db.campania.listas || [], categorias: db.campania.categorias || [], alertas: db.campania.alertas || alertasDemo(), videoVoto: !!db.campania.videoVoto, modulos: { video: true, gestiones: true }, tiposGestion: db.campania.tiposGestion || null, espacios: db.campania.espacios || ['Agrupación Centro', 'Agrupación Barrio Norte', 'Juventud'], disputas: db.campania.disputas !== false });
 
 export async function login(dni, pass) {
   await espera();
@@ -186,7 +186,36 @@ export function padronCantidad() {
 }
 
 // ---------- Personas ----------
-function visiblePersona(p) { return me.rol === 'cabeza' || p.path.includes(me.uid); }
+const esMia = (p) => me.rol === 'cabeza' || p.path.includes(me.uid);
+function visiblePersona(p) { return esMia(p) || (p.pathsDisputa || []).includes(me.uid); }
+// ---------- Personas en disputa ----------
+export async function disputarPersona(dni) {
+  await espera();
+  const p = db.personas[dni];
+  if (!p || db.campania.disputas === false || p.voto) throw err('permission-denied', 'No se puede disputar');
+  p.disputa = { ...(p.disputa || {}), [me.uid]: { nombre: me.nombre, path: me.path, at: ahora() } };
+  p.pathsDisputa = [...new Set([...(p.pathsDisputa || []), ...me.path])];
+  p.enDisputa = true;
+  guardar();
+  return { ok: true };
+}
+export function cierreVoto(p) {
+  if (!p?.disputa) return {};
+  const fin = { disputa: null, pathsDisputa: null, enDisputa: null };
+  if (esMia(p)) return fin;
+  const [uid, d] = Object.entries(p.disputa).find(([, x]) => (x.path || []).includes(me.uid)) || [];
+  if (!uid) return fin;
+  return { ...fin, ownerId: uid, ownerNombre: d.nombre, path: d.path };
+}
+const limpiarDisputa = (p) => { if (!p.disputa) { delete p.disputa; delete p.pathsDisputa; delete p.enDisputa; } };
+export async function dejarCon(dni, u) {
+  const p = db.personas[dni];
+  if (!p || me.rol !== 'cabeza') throw err('permission-denied', 'Solo una cabeza');
+  Object.assign(p, { ownerId: u.uid, ownerNombre: u.nombre, path: u.path, actualizadoAt: ahora() });
+  delete p.disputa; delete p.pathsDisputa; delete p.enDisputa;
+  guardar();
+}
+export async function guardarDisputas(v) { db.campania.disputas = !!v; if (me) me.disputas = !!v; guardar(); }
 
 export function watchPersonas(cb) {
   const f = () => cb(Object.values(db.personas).filter(visiblePersona));
@@ -198,7 +227,8 @@ export async function consultarPersona(dni) {
   await espera(80);
   const p = db.personas[dni];
   if (!p) return { estado: 'libre' };
-  if (visiblePersona(p)) return { estado: 'propia', persona: p };
+  if (esMia(p)) return { estado: 'propia', persona: p };
+  if (visiblePersona(p)) return { estado: 'disputa', persona: p };
   return { estado: 'ocupada' };
 }
 
@@ -206,6 +236,8 @@ export async function cargarPersona(datos, dueno = me) {
   await espera();
   const c = await consultarPersona(datos.dni);
   if (c.estado === 'propia') return { yaEnEquipo: true, persona: c.persona };
+  if (c.estado === 'disputa') return { yaEnDisputa: true, persona: c.persona };
+  if (c.estado === 'ocupada' && db.campania.disputas !== false) return { ocupada: true };
   if (c.estado === 'ocupada') {
     const id = registrarConflicto(datos.dni);
     return { conflicto: true, id };
@@ -224,7 +256,9 @@ export async function cargarPersona(datos, dueno = me) {
 export async function actualizarPersona(dni, cambios) {
   const p = db.personas[dni];
   if (!p || !visiblePersona(p)) throw err('permission-denied', 'No podés editar esta persona');
+  if (!esMia(p) && !(cambios.voto === true && cambios.ownerId)) throw err('permission-denied', 'No podés editar esta persona');
   Object.assign(p, cambios, { actualizadoAt: ahora() });
+  limpiarDisputa(p);
   guardar();
   return { ok: true };
 }
@@ -309,11 +343,12 @@ export async function listarPersonas(filtros = [], lim = 0) { await espera(60); 
 export async function leerListas() { return { listas: db.campania.listas || [], categorias: db.campania.categorias || [] }; }
 // Video de constancia: en la demo queda solo en la memoria de este navegador
 const videosMem = new Map();
-export async function subirVideoVoto(dni, archivo, onProgreso) {
+export async function subirVideoVoto(dni, archivo, onProgreso, persona) {
   for (let i = 1; i <= 5; i++) { await espera(90); onProgreso?.(i, 5); }
   videosMem.set(dni, URL.createObjectURL(archivo));
   const ahora = Date.now();
-  Object.assign(db.personas[dni], { video: { path: 'demo', tam: archivo.size, at: ahora, por: me.uid }, conVideo: true, voto: true, votoAt: ahora });
+  Object.assign(db.personas[dni], { video: { path: 'demo', tam: archivo.size, at: ahora, por: me.uid }, conVideo: true, voto: true, votoAt: ahora, ...cierreVoto(persona) });
+  limpiarDisputa(db.personas[dni]);
   guardar();
 }
 export async function urlVideoVoto(p) { return videosMem.get(p.dni) || null; }
@@ -336,7 +371,8 @@ export async function subirVideoConLink(c, t, dni, archivo, onProgreso) {
   if (!db) cargar();
   for (let i = 1; i <= 5; i++) { await espera(90); onProgreso?.(i, 5); }
   const ahora = Date.now();
-  Object.assign(db.personas[dni], { video: { path: 'demo', tam: archivo.size, at: ahora, token: t, por: 'votante' }, conVideo: true, voto: true, votoAt: ahora });
+  Object.assign(db.personas[dni], { video: { path: 'demo', tam: archivo.size, at: ahora, token: t, por: 'votante' }, conVideo: true, voto: true, votoAt: ahora, ...cierreVoto(persona) });
+  limpiarDisputa(db.personas[dni]);
   guardar();
 }
 export async function guardarVideoObligatorio(v) { db.campania.videoVoto = !!v; if (me) me.videoVoto = !!v; guardar(); }

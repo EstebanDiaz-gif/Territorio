@@ -49,7 +49,7 @@ service cloud.firestore {
 
       allow read: if miembro();
       allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias', 'alertas', 'videoVoto', 'tiposGestion', 'espacios']);
+      allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias', 'alertas', 'videoVoto', 'tiposGestion', 'espacios', 'disputas']);
 
       // ---------- Usuarios ----------
       match /usuarios/{uid} {
@@ -101,9 +101,15 @@ service cloud.firestore {
 
       // ---------- Personas (id = DNI: no puede haber dos con el mismo DNI) ----------
       match /personas/{dni} {
+        // "En disputa": otro dirigente también la cargó (si la campaña lo permite). La ven los dos equipos
+        // y cuenta una sola vez; se la lleva el primero que marca "Ya votó".
+        function enDisputa() { return request.auth.uid in resource.data.get('pathsDisputa', []); }
+        function sinDisputa() { return !('disputa' in request.resource.data) && !('pathsDisputa' in request.resource.data) && !('enDisputa' in request.resource.data); }
+
         // get de un DNI que no existe: se permite para saber que está libre
-        allow get: if gestor() && (resource == null || esCabeza() || enMiEquipo(resource.data.path));
-        allow list: if gestor() && (esCabeza() || enMiEquipo(resource.data.path));
+        allow get: if gestor() && (resource == null || esCabeza() || enMiEquipo(resource.data.path) || enDisputa());
+        allow list: if gestor() && (esCabeza() || enMiEquipo(resource.data.path) || enDisputa());
+
 
         // Se carga a nombre propio o de alguien de mi equipo, con el path real de ese dueño
         allow create: if gestor()
@@ -119,7 +125,31 @@ service cloud.firestore {
           || (soloCambia(['ownerId', 'ownerNombre', 'path', 'actualizadoAt'])
             && request.resource.data.path == usuario(request.resource.data.ownerId).path
             && (esCabeza() || enMiEquipo(request.resource.data.path)))
+          // el dueño (o su equipo) marca que votó: la disputa se cierra a su favor
+          || (soloCambia(['voto', 'votoAt', 'estado', 'actualizadoAt', 'video', 'conVideo', 'disputa', 'pathsDisputa', 'enDisputa'])
+            && request.resource.data.voto == true && sinDisputa())
+          // una cabeza decide con quién queda
+          || (esCabeza() && soloCambia(['ownerId', 'ownerNombre', 'path', 'disputa', 'pathsDisputa', 'enDisputa', 'actualizadoAt'])
+            && request.resource.data.path == usuario(request.resource.data.ownerId).path && sinDisputa())
         );
+        // Otro dirigente la carga "en disputa": solo se agrega él (con su path), sin ver ni tocar lo demás
+        allow update: if gestor()
+          && get(ruta('')).data.get('disputas', false) == true
+          && resource.data.voto == false
+          && !enMiEquipo(resource.data.path)
+          && soloCambia(['disputa', 'pathsDisputa', 'enDisputa', 'actualizadoAt'])
+          && request.resource.data.enDisputa == true
+          && request.resource.data.disputa.diff(resource.data.get('disputa', {})).affectedKeys().hasOnly([request.auth.uid])
+          && request.resource.data.disputa[request.auth.uid].path == yo().path
+          && request.resource.data.pathsDisputa.toSet().difference(resource.data.get('pathsDisputa', []).toSet()).hasOnly(yo().path);
+        // Uno de los que la disputan marca que votó: pasa a su equipo y la disputa se cierra
+        allow update: if gestor() && enDisputa()
+          && resource.data.voto == false && request.resource.data.voto == true
+          && request.resource.data.ownerId in resource.data.disputa
+          && request.resource.data.path == usuario(request.resource.data.ownerId).path
+          && enMiEquipo(request.resource.data.path)
+          && sinDisputa()
+          && soloCambia(['ownerId', 'ownerNombre', 'path', 'voto', 'votoAt', 'estado', 'actualizadoAt', 'video', 'conVideo', 'disputa', 'pathsDisputa', 'enDisputa']);
         // El votante, con su link personal (sin usuario), solo puede marcar que votó adjuntando su video
         allow update: if request.resource.data.video.token is string
           && exists(ruta('/tokensVideo/' + request.resource.data.video.token))
