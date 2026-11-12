@@ -79,7 +79,11 @@ export async function abrirMapa(api) {
     <div class="mapa-panel" id="m-panel"></div>`;
   document.body.appendChild(fondo);
   document.body.style.overflow = 'hidden';
-  const cerrar = () => { cancelar = true; mapa?.remove(); fondo.remove(); document.body.style.overflow = ''; };
+  const cerrar = (porBoton) => { cancelar = true; mapa?.remove(); fondo.remove(); document.body.style.overflow = ''; api.alCerrar?.(porBoton); };
+  api.alAbrir?.();
+  // gesto "atrás": primero sube un nivel; en el primero, cierra el mapa
+  fondo._atras = () => { if (pila.length > 1) { pila.pop(); pintar(); return true; } return false; };
+  fondo._cerrar = () => cerrar(false);
 
   const nodo = (id) => (id === 'raiz' ? { uid: 'raiz', nombre: api.me.campania || 'Toda la campaña', rol: 'cabeza' } : api.usuarios.find((u) => u.uid === id) || api.me);
   const hijosDe = (id) => api.usuarios.filter((u) => u.rol !== 'fiscal' && u.rol !== 'cabeza' && (id === 'raiz' ? u.rol === 'encargado' : u.parentId === id))
@@ -184,7 +188,7 @@ export async function abrirMapa(api) {
   fondo.addEventListener('click', (e) => {
     const b = e.target.closest('[data-m]'); if (!b) return;
     const a = b.dataset.m;
-    if (a === 'cerrar') cerrar();
+    if (a === 'cerrar') cerrar(true);
     else if (a === 'atras') { if (pila.length > 1) { pila.pop(); pintar(); } }
     else if (a === 'entrar') { const g = fondo.querySelector('#m-panel')._gs[+b.dataset.i]; if (g && !g.propio) { pila.push(g.u.uid); pintar(); } }
     else if (a === 'ubicar') ubicarTodas(fondo.querySelector('#m-panel')._sin || []);

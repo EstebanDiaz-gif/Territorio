@@ -204,9 +204,28 @@ function toast(msg, t = 2600) {
   setTimeout(() => d.remove(), t);
 }
 
+// ----- Botón / gesto "atrás" del celular: cierra la hoja o el mapa abierto, o vuelve a la sección anterior (en vez de salir de la app)
+let hojaEnHistorial = false; let popsPropios = 0;
+const volverSolo = () => { popsPropios++; history.back(); };
+function navegar(tab) { // cambio de sección con el botón de abajo
+  if (st.tab === tab) return;
+  st.tab = tab;
+  try { history.pushState({ tab }, ''); } catch { /* */ }
+}
+window.addEventListener('popstate', (e) => {
+  if (popsPropios > 0) { popsPropios--; return; }
+  if (hojaEnHistorial || $('.sheet-fondo')) { hojaEnHistorial = false; quitarHoja(); return; }
+  const m = document.querySelector('.mapa-full');
+  if (m) { if (m._atras?.()) { try { history.pushState({ mapa: 1 }, ''); } catch { /* */ } } else m._cerrar?.(); return; }
+  if (!st.me) return;
+  const tab = e.state?.tab || 'gente';
+  if (tab !== st.tab && tabsDisponibles().some(([k]) => k === tab)) { st.tab = tab; pintar(); }
+});
+
 let sheetCtx = null;
 function abrirHoja(html, ctx = null) {
-  cerrarHoja();
+  quitarHoja();
+  if (!hojaEnHistorial) { hojaEnHistorial = true; try { history.pushState({ tab: st.tab, hoja: 1 }, ''); } catch { /* */ } }
   sheetCtx = ctx;
   const f = document.createElement('div');
   f.className = 'sheet-fondo';
@@ -216,6 +235,10 @@ function abrirHoja(html, ctx = null) {
   document.body.style.overflow = 'hidden';
 }
 function cerrarHoja() {
+  quitarHoja();
+  if (hojaEnHistorial) { hojaEnHistorial = false; volverSolo(); }
+}
+function quitarHoja() {
   document.querySelectorAll('.sheet-fondo').forEach((x) => x.remove());
   document.body.style.overflow = '';
   sheetCtx = null;
@@ -231,6 +254,7 @@ async function boot() {
 function iniciarSesion(me) {
   st.me = me;
   st.tab = 'gente';
+  try { history.replaceState({ tab: 'gente' }, ''); } catch { /* */ }
   st.f = { estado: 'todos', q: '', de: '', limite: 60 };
   st.c = { fase: 'inicio' };
   st.resumen = undefined; st.circAbiertos = null; st.abiertos = null;
@@ -2234,7 +2258,7 @@ const acciones = {
   'demo-entrar': async (el) => iniciarSesion(await S.loginDemo(el.dataset.uid)),
   'ir-crear': () => { st.login = 'crear'; pintarLogin(); },
   'ir-entrar': () => { st.login = 'entrar'; pintarLogin(); },
-  tab: (el) => { st.tab = el.dataset.tab; cerrarHoja(); pintar(); if (st.tab === 'cargar') $('#c-dni')?.focus(); },
+  tab: (el) => { cerrarHoja(); navegar(el.dataset.tab); pintar(); if (st.tab === 'cargar') $('#c-dni')?.focus(); },
   cuenta: hojaCuenta,
   'mi-clave': hojaMiClave,
   blanquear: (el) => hojaBlanquear(el.dataset.uid),
@@ -2259,6 +2283,8 @@ const acciones = {
   'c-guardar': guardarCarga,
   mapa: () => abrirMapa({
     me: st.me, esc, ic, toast,
+    alAbrir: () => { try { history.pushState({ tab: st.tab, mapa: 1 }, ''); } catch { /* */ } },
+    alCerrar: (porBoton) => { if (porBoton) volverSolo(); },
     usuarios: st.me.rol === 'cabeza' ? st.usuarios : [st.me, ...miEquipo()],
     personasDe: async (uid) => {
       if (!liviano()) return propias(st.personas).filter((p) => !uid || (p.path || []).includes(uid));
@@ -2475,7 +2501,7 @@ const acciones = {
     st.fx.cat = (faltanCats(miFiscalia().acta)[0] || categorias()[0]).id;
     pintarFiscal();
   },
-  'eq-ver-gente': (el) => { st.tab = 'gente'; st.f = { estado: 'todos', q: '', de: el.dataset.uid, limite: 60 }; pintar(); },
+  'eq-ver-gente': (el) => { navegar('gente'); st.f = { estado: 'todos', q: '', de: el.dataset.uid, limite: 60 }; pintar(); },
   copiar: async (el) => {
     try { await navigator.clipboard.writeText(el.dataset.txt); toast('Mensaje copiado'); }
     catch { const r = document.createRange(); r.selectNodeContents($('#nu-msg')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Seleccioná y copiá el texto'); }
