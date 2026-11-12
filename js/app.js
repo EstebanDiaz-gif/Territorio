@@ -3,6 +3,7 @@ import {
   ROLES, ROL_LABEL, ROL_CORTO, nivel, rolAbajo, ESTADOS, ESTADO_LABEL, TIPOS, TIPO_LABEL,
   normDni, dniValido, fmtDni, telWhatsApp, idLista, palabrasDe, circuitosDe, unCircuito, textoCircuitos
 } from './roles.js';
+import { abrirMapa } from './mapa.js';
 import { leerArchivo, mapearPersonas, mapearPadron, exportarExcel, exportarGestiones, NOMBRE_COLUMNA } from './importers.js';
 
 const S = FIREBASE_CONFIG ? await import('./store-firebase.js') : await import('./store-demo.js');
@@ -175,6 +176,8 @@ const I = {
   candado: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   ok: '<path d="M5 12.5l4.5 4.5L19 7"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  atras: '<path d="M15 5l-7 7 7 7"/>',
+  capas: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   llave: '<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2.5 2.5M14 9l2 2"/>',
   alerta: '<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4.5M12 17.5v.3"/>',
   mas: '<path d="M12 5v14M5 12h14"/>',
@@ -412,6 +415,7 @@ function vistaGente() {
         <option value="">Todo mi equipo</option>
         ${ordenarArbol(equipo).map((u) => `<option value="${u.uid}" ${st.f.de === u.uid ? 'selected' : ''}>${'  '.repeat(Math.max(0, nivel(u.rol) - nivel(st.me.rol) - 1))}${esc(u.nombre)} · ${ROL_CORTO[u.rol]}</option>`).join('')}
       </select>`}
+    ${esMov() ? `<button type="button" class="btn btn-sec btn-sm" data-act="mapa">${ic('mapa', 16)} Ver mi zona en el mapa</button>` : ''}
     <div class="chips" role="group" aria-label="Filtrar">${filtros.map(([k, l]) => `<button type="button" class="chip" data-act="filtro" data-v="${k}" aria-pressed="${st.f.estado === k}">${l}</button>`).join('')}</div>
     <div id="lista" class="lista"></div>`;
 }
@@ -507,6 +511,7 @@ function hojaPersona(dni, confirmarBorrado = false) {
         <input id="p-dom" class="input" value="${esc(p.domicilio || '')}" placeholder="Calle y número, barrio" autocomplete="off">
         <div class="muted small">Si se mudó o el del padrón está mal, corregilo acá.</div></div>
       ${casaUrl(p.domicilio) ? `<a class="btn btn-full" id="p-ir-casa" href="${casaUrl(p.domicilio)}" target="_blank" rel="noopener">${ic('casa', 18)} Ir a su casa</a>` : ''}
+      <button type="button" class="btn btn-ghost btn-sm" data-act="p-geo">${ic('mapa', 16)} ${p.geo?.src === 'gps' ? 'Ubicada en el mapa desde su casa ✓ · actualizar' : 'Estoy en su casa: marcarla en el mapa'}</button>
     </div>
     <div><span class="label">Estado</span>
       <div class="chips wrap">${ESTADOS.map(([k, l]) => `<button type="button" class="chip est" data-act="p-estado" data-v="${k}" aria-pressed="${p.estado === k}">${l}</button>`).join('')}</div>
@@ -1269,6 +1274,7 @@ function vistaEquipo() {
       ${abajo ? `<button class="btn grow" data-act="nuevo-usuario" data-rol="${abajo}">${ic('mas')} Agregar ${ROL_CORTO[abajo].toLowerCase()}</button>` : ''}
       ${st.me.rol === 'cabeza' ? `<button class="btn btn-sec" data-act="nuevo-usuario" data-rol="cabeza">${ic('mas')} Cabeza</button>` : ''}
     </div>
+    <button type="button" class="btn btn-sec" data-act="mapa">${ic('mapa', 18)} Ver el territorio en el mapa</button>
     <div class="muted small">Cada uno agrega a los del nivel de abajo: cabezas → encargados de circuito → dirigentes → movilizadores. Cada uno ve solo a su gente y a la de su equipo.</div>
     <div id="equipo"></div>`;
 }
@@ -2251,6 +2257,26 @@ const acciones = {
   'c-buscar': buscarDni,
   'c-estado': (el) => { st.c.estado = el.dataset.v; document.querySelectorAll('[data-act=c-estado]').forEach((b) => b.setAttribute('aria-pressed', b === el)); },
   'c-guardar': guardarCarga,
+  mapa: () => abrirMapa({
+    me: st.me, esc, ic, toast,
+    usuarios: st.me.rol === 'cabeza' ? st.usuarios : [st.me, ...miEquipo()],
+    personasDe: async (uid) => {
+      if (!liviano()) return propias(st.personas).filter((p) => !uid || (p.path || []).includes(uid));
+      return recordar(await S.listarPersonas(uid ? [['path', 'array-contains', uid]] : [], 3000));
+    },
+    guardarGeo: async (dni, geo) => { await S.actualizarPersona(dni, { geo }); const p = personaLocal(dni); if (p) p.geo = geo; }
+  }),
+  'p-geo': (el) => {
+    const dni = sheetCtx.dni;
+    if (!navigator.geolocation) { toast('Este teléfono no tiene GPS disponible'); return; }
+    el.disabled = true; el.textContent = 'Buscando tu ubicación…';
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+      if (accuracy > 150) { toast(`La señal del GPS es mala (±${Math.round(accuracy)} m). Probá afuera de la casa.`); hojaPersona(dni); return; }
+      try { await actualizarPersonaApp(dni, { geo: { lat: +lat.toFixed(6), lng: +lng.toFixed(6), src: 'gps', at: Date.now() } }); toast('Quedó marcada en el mapa'); } catch (e) { toast(mensajeError(e)); }
+      hojaPersona(dni);
+    }, () => { toast('No se pudo usar el GPS. Revisá el permiso de ubicación.'); hojaPersona(dni); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  },
   'c-disputar': async (el) => {
     el.disabled = true;
     try {
@@ -2557,7 +2583,7 @@ document.addEventListener('change', async (e) => {
   if (sheetCtx?.tipo === 'persona') {
     const dni = sheetCtx.dni;
     if (id === 'p-tel') { await actualizarPersonaApp(dni, { tel: normDni(e.target.value) }); toast('Teléfono guardado'); }
-    if (id === 'p-dom') { await actualizarPersonaApp(dni, { domicilio: e.target.value.trim().slice(0, 120) }); toast('Domicilio guardado'); hojaPersona(dni); }
+    if (id === 'p-dom') { const p0 = personaLocal(dni); await actualizarPersonaApp(dni, { domicilio: e.target.value.trim().slice(0, 120), ...(p0?.geo && p0.geo.src !== 'gps' ? { geo: null } : {}) }); toast('Domicilio guardado'); hojaPersona(dni); }
     if (id === 'p-nota') { await actualizarPersonaApp(dni, { nota: e.target.value.trim(), revisar: false }); toast('Nota guardada'); }
     if (id === 'p-tipo') { await actualizarPersonaApp(dni, { tipo: e.target.value }); }
   }

@@ -14,6 +14,20 @@ function cargar() {
   if (!db || !db.usuarios) db = semilla();
   db.ubicaciones ||= semillaUbicaciones();
   db.gestiones ||= semillaGestiones();
+  geoDemo();
+}
+// Demo: ubicaciones inventadas en San Miguel de Tucumán, agrupadas por equipo (para que se vean las zonas en el mapa)
+function geoDemo() {
+  const h = (str) => { let x = 2166136261; for (const c of String(str)) { x ^= c.charCodeAt(0); x = Math.imul(x, 16777619); } x ^= x >>> 15; x = Math.imul(x, 2246822507); x ^= x >>> 13; return x >>> 0; };
+  const off = (str, esc) => { const v = h(str); return [((v & 0xffff) / 0xffff - 0.5) * esc, ((v >>> 16) / 0xffff - 0.5) * esc * 1.2]; };
+  for (const p of Object.values(db.personas || {})) {
+    if ('geo' in p) continue;
+    if (h(p.dni) % 9 === 0) continue; // algunas quedan sin ubicar, como en la vida real
+    let lat = -26.8285; let lng = -65.2130;
+    (p.path || []).slice(1).forEach((uid, i) => { const [a, b] = off(uid, [0.07, 0.03, 0.014][i] || 0.008); lat += a; lng += b; });
+    const [a, b] = off(p.dni + 'x', 0.009);
+    p.geo = { lat: +(lat + a).toFixed(6), lng: +(lng + b).toFixed(6), src: 'demo' };
+  }
 }
 // Gestiones de ejemplo (este mes y el anterior), cargadas por movilizadores y dirigentes de la demo
 function semillaGestiones() {
@@ -371,8 +385,7 @@ export async function subirVideoConLink(c, t, dni, archivo, onProgreso) {
   if (!db) cargar();
   for (let i = 1; i <= 5; i++) { await espera(90); onProgreso?.(i, 5); }
   const ahora = Date.now();
-  Object.assign(db.personas[dni], { video: { path: 'demo', tam: archivo.size, at: ahora, token: t, por: 'votante' }, conVideo: true, voto: true, votoAt: ahora, ...cierreVoto(persona) });
-  limpiarDisputa(db.personas[dni]);
+  Object.assign(db.personas[dni], { video: { path: 'demo', tam: archivo.size, at: ahora, token: t, por: 'votante' }, conVideo: true, voto: true, votoAt: ahora });
   guardar();
 }
 export async function guardarVideoObligatorio(v) { db.campania.videoVoto = !!v; if (me) me.videoVoto = !!v; guardar(); }

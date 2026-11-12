@@ -120,7 +120,7 @@ service cloud.firestore {
 
         allow update: if gestor() && (esCabeza() || enMiEquipo(resource.data.path)) && (
           // cambios comunes
-          soloCambia(['estado', 'tel', 'domicilio', 'voto', 'votoAt', 'nota', 'tipo', 'revisar', 'actualizadoAt', 'video', 'conVideo'])
+          soloCambia(['estado', 'tel', 'domicilio', 'geo', 'voto', 'votoAt', 'nota', 'tipo', 'revisar', 'actualizadoAt', 'video', 'conVideo'])
           // transferencia a otro dueño dentro de mi equipo (las cabezas, a cualquiera)
           || (soloCambia(['ownerId', 'ownerNombre', 'path', 'actualizadoAt'])
             && request.resource.data.path == usuario(request.resource.data.ownerId).path
