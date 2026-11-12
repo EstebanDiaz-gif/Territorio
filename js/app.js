@@ -2285,6 +2285,7 @@ const acciones = {
     me: st.me, esc, ic, toast,
     alAbrir: () => { try { history.pushState({ tab: st.tab, mapa: 1 }, ''); } catch { /* */ } },
     alCerrar: (porBoton) => { if (porBoton) volverSolo(); },
+    verFicha: (p) => { if (!personaLocal(p.dni)) recordar([p]); hojaPersona(p.dni); },
     usuarios: st.me.rol === 'cabeza' ? st.usuarios : [st.me, ...miEquipo()],
     personasDe: async (uid) => {
       if (!liviano()) return propias(st.personas).filter((p) => !uid || (p.path || []).includes(uid));

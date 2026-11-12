@@ -24,8 +24,8 @@ function geoDemo() {
     if ('geo' in p) continue;
     if (h(p.dni) % 9 === 0) continue; // algunas quedan sin ubicar, como en la vida real
     let lat = -26.8285; let lng = -65.2130;
-    (p.path || []).slice(1).forEach((uid, i) => { const [a, b] = off(uid, [0.07, 0.03, 0.014][i] || 0.008); lat += a; lng += b; });
-    const [a, b] = off(p.dni + 'x', 0.009);
+    (p.path || []).slice(1).forEach((uid, i) => { const [a, b] = off(uid, [0.08, 0.045, 0.03][i] || 0.02); lat += a; lng += b; });
+    const [a, b] = off(p.dni + 'x', 0.007);
     p.geo = { lat: +(lat + a).toFixed(6), lng: +(lng + b).toFixed(6), src: 'demo' };
   }
 }
