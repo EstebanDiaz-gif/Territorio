@@ -71,12 +71,13 @@ const COLUMNAS = [
   ['escuela', /escuela|establecimiento|colegio|local de votacion/],
   ['dni', /\bdni\b|documento|^doc\b|^nro\.? ?doc|matricula/],
   ['apellido', /^apellidos?$/],
-  ['nombre', /nombre/],
+  // también "Apellido y nombre", "Nombre y apellido" y errores de tipeo comunes ("NOMNRE", "NOMBE"…)
+  ['nombre', /nombre|nom[bn]?re|nombe|apell|^elector|^ciudadano/],
   ['tel', /telef|celular|^cel\b|whats|movil|contacto/],
   ['domicilio', /direccion|domicilio|calle/],
   ['mesa', /^mesa|n.? de mesa/],
   ['orden', /orden/],
-  ['circuito', /circuito/],
+  ['circuito', /circuito|^circ\.?$|^cto\.?$/],
   ['seccion', /seccion/]
 ];
 
