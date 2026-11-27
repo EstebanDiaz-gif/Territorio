@@ -168,7 +168,8 @@ export async function buscarPadron(dni) {
   const b = db.padron[bucketDe(dni)];
   return b && b[dni] ? padronDeString(dni, b[dni]) : null;
 }
-export async function importarPadron(registros, onProgreso) {
+export async function importarPadron(registros, onProgreso, { reemplazar = false } = {}) {
+  if (reemplazar) db.padron = {};
   let i = 0;
   for (const r of registros) {
     const k = bucketDe(r.dni);
@@ -177,6 +178,22 @@ export async function importarPadron(registros, onProgreso) {
   }
   guardar();
   onProgreso?.(registros.length, registros.length);
+}
+export async function actualizarPersonasPadron(registros, { completo = false } = {}) {
+  if (me.rol !== 'cabeza') return null;
+  const idx = new Map(registros.map((r) => [r.dni, r]));
+  let actualizadas = 0; let cambioMesa = 0; let fuera = 0; const ps = Object.values(db.personas);
+  for (const p of ps) {
+    const r = idx.get(p.dni);
+    if (!r) { if (completo) { fuera++; if (!p.fueraPadron) { p.fueraPadron = true; actualizadas++; } } continue; }
+    let cambio = false;
+    for (const k of ['circuito', 'escuela', 'dirEscuela', 'mesa', 'orden']) if (r[k] && String(p[k] ?? '') !== String(r[k])) { if (k === 'mesa' || k === 'escuela') cambio = 'mesa'; p[k] = r[k]; cambio ||= true; }
+    if (p.fueraPadron) { delete p.fueraPadron; cambio ||= true; }
+    if (cambio) actualizadas++;
+    if (cambio === 'mesa') cambioMesa++;
+  }
+  guardar();
+  return { total: ps.length, actualizadas, cambioMesa, fuera };
 }
 export async function leerResumenPadron() {
   const c = {};

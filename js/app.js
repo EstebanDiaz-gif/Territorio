@@ -95,6 +95,7 @@ function filtrosGente() {
   const f = []; const e = st.f.estado;
   if (e === 'fiscal') f.push(['tipo', 'in', ['fiscal', 'fiscal_suplente']]);
   else if (e === 'disputa') f.push(['enDisputa', '==', true]);
+  else if (e === 'fuera') f.push(['fueraPadron', '==', true]);
   else if (e === 'revisar') f.push(['revisar', '==', true]);
   else if (e !== 'todos') f.push(['estado', '==', e]);
   const q = st.f.q.trim(); const qd = normDni(q);
@@ -432,7 +433,7 @@ function refrescarPartes() {
 // ---------------------------------------------------------------- GENTE
 function vistaGente() {
   const equipo = miEquipo();
-  const filtros = [['todos', 'Todos'], ['confirmado', 'Confirmados'], ['traslado', 'Traslado'], ['dudoso', 'Dudosos'], ['sin', 'Sin contactar'], ['fiscal', 'Fiscales'], ['revisar', 'A revisar'], ...(st.me.disputas || st.personas.some(enDisputa) ? [['disputa', 'En disputa']] : [])];
+  const filtros = [['todos', 'Todos'], ['confirmado', 'Confirmados'], ['traslado', 'Traslado'], ['dudoso', 'Dudosos'], ['sin', 'Sin contactar'], ['fiscal', 'Fiscales'], ['revisar', 'A revisar'], ...(st.me.disputas || st.personas.some(enDisputa) ? [['disputa', 'En disputa']] : []), ...(st.hayFueraPadron || st.personas.some((p) => p.fueraPadron) ? [['fuera', 'Fuera del padrón']] : [])];
   return `
     <label class="search">${ic('buscar', 18)}<input id="q" type="search" placeholder="Buscar por nombre, DNI o escuela" value="${esc(st.f.q)}" aria-label="Buscar"></label>
     ${esMov() ? '' : `<select id="de" class="input" aria-label="Ver gente de">
@@ -451,9 +452,10 @@ function filtrarGente() {
     const e = st.f.estado;
     if (st.f.de && !p.path.includes(st.f.de) && !(e === 'disputa' && (p.pathsDisputa || []).includes(st.f.de))) return false;
     if (e === 'disputa' && !enDisputa(p)) return false;
+    if (e === 'fuera' && !p.fueraPadron) return false;
     if (e === 'fiscal' && !(p.tipo && p.tipo !== 'votante')) return false;
     if (e === 'revisar' && !p.revisar) return false;
-    if (!['todos', 'fiscal', 'revisar', 'disputa'].includes(e) && p.estado !== e) return false;
+    if (!['todos', 'fiscal', 'revisar', 'disputa', 'fuera'].includes(e) && p.estado !== e) return false;
     if (q) {
       const hay = sinAcentos(`${p.nombre} ${p.escuela} ${p.ownerNombre} ${p.domicilio}`);
       if (!(hay.includes(q) || (qd.length >= 3 && p.dni.includes(qd)))) return false;
@@ -469,6 +471,7 @@ function tarjetaPersona(p) {
   if (p.revisar) tags.push('<span class="pill p-warn">Revisar</span>');
   if (p.video) tags.push('<span class="pill p-ok">Video ✓</span>');
   if (enDisputa(p)) tags.unshift('<span class="pill p-bad">En disputa</span>');
+  if (p.fueraPadron) tags.unshift('<span class="pill p-warn">No está en el padrón</span>');
   const mio = p.ownerId === st.me.uid;
   const wa = waUrl(p.tel, textoRecordatorio(p));
   return `<div class="row">
@@ -521,6 +524,7 @@ function hojaPersona(dni, confirmarBorrado = false) {
     </div>
     ${p.revisar ? `<div class="aviso warn">${ic('alerta', 18)}<span>${esc(p.nota || 'Hay datos para revisar')}</span></div>` : ''}
     ${htmlDisputa(p)}
+    ${p.fueraPadron ? `<div class="aviso warn">${ic('alerta', 18)}<span>No figura en el último padrón: puede haberse mudado o tener otro domicilio electoral. Revisá con la persona.</span></div>` : ''}
     <div class="card pad stack">
       <dl class="ficha" style="margin:0">
         <div class="full"><dt>Escuela</dt><dd>${esc(p.escuela || 'Sin dato')}</dd>${p.dirEscuela ? `<div class="muted">${esc(p.dirEscuela)}</div>` : ''}</div>
@@ -1783,6 +1787,8 @@ async function analizarPadron(file) {
       <div class="tiles"><div class="tile t-ok"><b>${m.registros.length.toLocaleString('es-AR')}</b><span>electores válidos</span></div>
       <div class="tile t-neutral"><b>${m.invalidos}</b><span>filas sin DNI válido</span></div></div>
       <div class="card pad small stack">${ej.map((r) => `<div><b>${esc(r.nombre)}</b> · DNI ${fmtDni(r.dni)}<br><span class="muted">${esc(r.escuela)} · Mesa ${esc(r.mesa)} · Orden ${esc(r.orden)} · Circ. ${esc(r.circuito)}</span></div>`).join('')}</div>
+      <label class="check"><input type="checkbox" id="pad-reemplazar"> <span><b>Reemplazar el padrón anterior.</b> Borra el que estaba cargado, así no quedan personas que ya no figuran. Usalo cuando subas el padrón <b>completo</b> actualizado.</span></label>
+      <div class="muted small">La gente que tu equipo ya cargó toma sola la escuela, mesa y orden de este padrón.</div>
       <button class="btn btn-full" data-act="pad-confirmar">Importar padrón</button>`;
   } catch (e) {
     res.innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>${esc(mensajeError(e))}</span></div>`;
@@ -1793,17 +1799,36 @@ async function confirmarPadron() {
   if (!m) return;
   const circ = normDni($('#pad-circ').value);
   if (circ) m.registros.forEach((r) => { if (!r.circuito) r.circuito = circ; });
+  const reemplazar = !!$('#pad-reemplazar')?.checked;
+  if (reemplazar && !confirm('Se va a borrar el padrón cargado y se reemplaza por este. ¿Seguimos?')) return;
   const res = $('#pad-res');
   res.innerHTML = '<div class="muted" id="pad-txt">Subiendo…</div><div class="progreso"><i id="pad-prog"></i></div>';
+  const avance = (txt) => (h, t) => {
+    const b = $('#pad-prog'); if (b) b.style.width = pct(h, t) + '%';
+    const x = $('#pad-txt'); if (x) x.textContent = `${txt} ${h.toLocaleString('es-AR')} de ${t.toLocaleString('es-AR')}…`;
+  };
   try {
-    await S.importarPadron(m.registros, (h, t) => {
-      const b = $('#pad-prog'); if (b) b.style.width = pct(h, t) + '%';
-      const x = $('#pad-txt'); if (x) x.textContent = `Subiendo ${h.toLocaleString('es-AR')} de ${t.toLocaleString('es-AR')}…`;
-    });
+    if (reemplazar) { const x = $('#pad-txt'); if (x) x.textContent = 'Borrando el padrón anterior…'; }
+    await S.importarPadron(m.registros, avance('Subiendo'), { reemplazar });
     st.pad = null;
     $('#pad-file').value = '';
     cargarResumen(true);
-    res.innerHTML = `<div class="aviso ok">${ic('ok', 18)}<span>Padrón cargado: ${m.registros.length.toLocaleString('es-AR')} electores.</span></div>`;
+    let r = null;
+    if (st.me.rol === 'cabeza') {
+      const x = $('#pad-txt'); if (x) x.textContent = 'Actualizando a la gente ya cargada…';
+      const b = $('#pad-prog'); if (b) b.style.width = '0%';
+      r = await S.actualizarPersonasPadron(m.registros, { completo: reemplazar }, avance('Actualizando'));
+      if (r?.fuera) st.hayFueraPadron = true;
+      invalidarConteos(); programarRefresco();
+    }
+    const n = (x) => x.toLocaleString('es-AR');
+    res.innerHTML = `<div class="aviso ok">${ic('ok', 18)}<span>Padrón cargado: ${n(m.registros.length)} electores.</span></div>
+      ${r && r.total ? `<div class="card pad stack small">
+        <b>Tu gente cargada (${n(r.total)})</b>
+        <div>${r.cambioMesa ? `<b>${n(r.cambioMesa)}</b> cambiaron de escuela o mesa: ya tienen los datos nuevos.` : 'Nadie cambió de escuela ni de mesa.'}</div>
+        ${r.fuera ? `<div><b style="color:var(--warn)">${n(r.fuera)}</b> ya no figuran en este padrón. Puede que se hayan mudado: conviene que cada dirigente los revise.</div>
+          <button type="button" class="btn btn-sec btn-sm" data-act="pad-ver-fuera">Ver quiénes son</button>` : ''}
+      </div>` : ''}`;
   } catch (e) {
     res.innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>${esc(mensajeError(e))}</span></div>`;
   }
@@ -2304,6 +2329,7 @@ const acciones = {
       hojaPersona(dni);
     }, () => { toast('No se pudo usar el GPS. Revisá el permiso de ubicación.'); hojaPersona(dni); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
   },
+  'pad-ver-fuera': () => { cerrarHoja(); st.f = { estado: 'fuera', q: '', de: '', limite: 60 }; navegar('gente'); pintar(); },
   'c-disputar': async (el) => {
     el.disabled = true;
     try {

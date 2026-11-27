@@ -128,6 +128,8 @@ service cloud.firestore {
           // el dueño (o su equipo) marca que votó: la disputa se cierra a su favor
           || (soloCambia(['voto', 'votoAt', 'estado', 'actualizadoAt', 'video', 'conVideo', 'disputa', 'pathsDisputa', 'enDisputa'])
             && request.resource.data.voto == true && sinDisputa())
+          // una cabeza actualiza los datos de votación con un padrón nuevo
+          || (esCabeza() && soloCambia(['circuito', 'escuela', 'dirEscuela', 'mesa', 'orden', 'fueraPadron', 'actualizadoAt']))
           // una cabeza decide con quién queda
           || (esCabeza() && soloCambia(['ownerId', 'ownerNombre', 'path', 'disputa', 'pathsDisputa', 'enDisputa', 'actualizadoAt'])
             && request.resource.data.path == usuario(request.resource.data.ownerId).path && sinDisputa())

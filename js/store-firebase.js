@@ -210,7 +210,8 @@ export async function buscarPadron(dni) {
   return v ? padronDeString(dni, v) : null;
 }
 
-export async function importarPadron(registros, onProgreso) {
+export async function importarPadron(registros, onProgreso, { reemplazar = false } = {}) {
+  if (reemplazar) await borrarPadron();
   const grupos = {};
   for (const r of registros) (grupos[bucketDe(r.dni)] ||= {})[r.dni] = padronAString(r);
   const claves = Object.keys(grupos);
@@ -231,8 +232,36 @@ export async function importarPadron(registros, onProgreso) {
     hechos += personas;
     onProgreso?.(hechos, registros.length);
   }
-  await setDoc(D('padron', 'resumen'), { circuitos: resumirPadron(registros) }, { merge: true });
+  await setDoc(D('padron', 'resumen'), { circuitos: resumirPadron(registros) }, reemplazar ? {} : { merge: true });
   baldes.clear();
+}
+// Después de subir un padrón nuevo: la gente ya cargada toma la escuela, mesa y orden nuevos.
+// Si el padrón reemplazó al anterior (es el completo), marca a quienes ya no figuran.
+const CAMPOS_PADRON = ['circuito', 'escuela', 'dirEscuela', 'mesa', 'orden'];
+export async function actualizarPersonasPadron(registros, { completo = false } = {}, onProgreso) {
+  if (me.rol !== 'cabeza') return null;
+  const idx = new Map(registros.map((r) => [r.dni, r]));
+  const snap = await getDocs(C('personas'));
+  const cambios = []; let cambioMesa = 0; let fuera = 0;
+  for (const d of snap.docs) {
+    const p = d.data(); const r = idx.get(p.dni || d.id);
+    if (!r) {
+      if (completo) { fuera++; if (!p.fueraPadron) cambios.push([d.ref, { fueraPadron: true, actualizadoAt: serverTimestamp() }]); }
+      continue;
+    }
+    const c = {};
+    for (const k of CAMPOS_PADRON) if (r[k] && String(p[k] ?? '') !== String(r[k])) c[k] = r[k];
+    if ('mesa' in c || 'escuela' in c) cambioMesa++;
+    if (p.fueraPadron) c.fueraPadron = deleteField();
+    if (Object.keys(c).length) cambios.push([d.ref, { ...c, actualizadoAt: serverTimestamp() }]);
+  }
+  for (let i = 0; i < cambios.length; i += 400) {
+    const b = writeBatch(db);
+    cambios.slice(i, i + 400).forEach(([ref, c]) => b.update(ref, c));
+    await b.commit();
+    onProgreso?.(Math.min(i + 400, cambios.length), cambios.length);
+  }
+  return { total: snap.size, actualizadas: cambios.length, cambioMesa, fuera };
 }
 
 // Resumen del padrón: electores por circuito y por escuela (para el tablero)
