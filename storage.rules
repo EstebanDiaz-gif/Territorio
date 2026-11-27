@@ -13,7 +13,7 @@ service firebase.storage {
           && (request.auth.uid in firestore.get(/databases/(default)/documents/campanias/$(cid)/personas/$(dni)).data.path
             || request.auth.uid in firestore.get(/databases/(default)/documents/campanias/$(cid)/personas/$(dni)).data.get('pathsDisputa', [])));
       }
-      allow read: if deMiEquipo();
+      allow read: if deMiEquipo() || (request.auth != null && firestore.exists(/databases/(default)/documents/duenos/$(request.auth.uid)));
       allow create, update: if deMiEquipo()
         && request.resource.size < 60 * 1024 * 1024
         && request.resource.contentType.matches('video/.*');

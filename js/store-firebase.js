@@ -44,8 +44,32 @@ async function aceptarInvitacion(uid, dni) {
   return true;
 }
 
+// ---------- Dueño de la app: ve todas las campañas, solo para mirar ----------
+let dueno = null;
+async function esDueno(uid) { try { return (await getDoc(doc(db, 'duenos', uid))).exists(); } catch { return false; } }
+export async function listarCampanias() {
+  const s = await getDocs(collection(db, 'campanias'));
+  const cnt = async (id, n) => { try { return (await getCountFromServer(collection(db, 'campanias', id, n))).data().count; } catch { return null; } };
+  return Promise.all(s.docs.map(async (d) => {
+    const x = d.data();
+    const [personas, usuarios] = await Promise.all([cnt(d.id, 'personas'), cnt(d.id, 'usuarios')]);
+    return { cid: d.id, nombre: x.nombre || '(sin nombre)', creado: x.creado?.toMillis?.() || 0, modulos: x.modulos || {}, personas, usuarios };
+  }));
+}
+export async function verCampania(c) {
+  cid = c;
+  const x = (await getDoc(doc(db, 'campanias', cid))).data() || {};
+  me = { uid: dueno.uid, dni: dueno.dni, nombre: 'Dueño de la app', rol: 'cabeza', parentId: null, path: [dueno.uid], circuito: '', soloLectura: true, duenio: true,
+    campania: x.nombre || '', listas: x.listas || [], categorias: x.categorias || [], alertas: x.alertas || null, videoVoto: !!x.videoVoto, modulos: x.modulos || {},
+    tiposGestion: x.tiposGestion || null, espacios: x.espacios || [], disputas: !!x.disputas };
+  return me;
+}
+export function volverAlPanel() { cid = null; me = dueno; return me; }
+export function guardarModulos(c, modulos) { return updateDoc(doc(db, 'campanias', c), { modulos }); }
+
 async function cargarMe(uid) {
   const dni = String(auth.currentUser?.email || '').split('@')[0];
+  if (await esDueno(uid)) { dueno = { uid, dni, nombre: 'Dueño de la app', rol: 'dueno', duenio: true }; cid = null; me = dueno; return me; }
   const cuenta = await getDoc(doc(db, 'cuentas', uid));
   let activo = false;
   if (cuenta.exists()) {
@@ -81,7 +105,7 @@ export async function login(dni, pass) {
 
 export async function logout() {
   await signOut(auth);
-  me = null; cid = null;
+  me = null; cid = null; dueno = null;
 }
 
 export async function crearCampania({ campania, nombre, dni, pass, tel }) {

@@ -669,3 +669,9 @@ nav.tabs button[aria-current="page"]::before { content: ''; position: absolute; 
 .recorrido .rc-fin::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 .recorrido .rc-pend::before { border-style: dashed; border-color: #FBBF24; }
 .recorrido .rc-pend b { color: var(--warn); }
+
+/* Dueño mirando una campaña */
+.dueno-band { background: rgba(99, 102, 241, .16); color: #A5B4FC; border-bottom: 1px solid rgba(99, 102, 241, .35); display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.dueno-band button { border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 999px; padding: 3px 12px; font-size: 12.5px; font-weight: 600; }
+#app.shell > .dueno-band { grid-column: 2; }
+@media (max-width: 1023px) { #app.shell > .dueno-band { grid-column: auto; } }

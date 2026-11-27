@@ -9,6 +9,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Dueño de la app: ve todas las campañas (solo lectura) y prende o apaga sus módulos.
+    // Se marca a mano en la consola creando el documento duenos/{uid}; desde la app nadie puede dárselo.
+    match /duenos/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+    }
+
     // A qué campaña pertenece cada cuenta
     match /cuentas/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
@@ -41,19 +47,21 @@ service cloud.firestore {
         return r == 'cabeza' ? 0 : (r == 'encargado' ? 1 : (r == 'dirigente' ? 2 : (r == 'movilizador' ? 3 : 9)));
       }
       function enMiEquipo(p) { return request.auth.uid in p; }
+      function dueno() { return request.auth != null && exists(/databases/$(database)/documents/duenos/$(request.auth.uid)); }
       // Todos menos los fiscales
       function gestor() { return miembro() && yo().rol != 'fiscal'; }
       function soloCambia(campos) {
         return request.resource.data.diff(resource.data).affectedKeys().hasOnly(campos);
       }
 
-      allow read: if miembro();
+      allow read: if miembro() || dueno();
+      allow update: if dueno() && soloCambia(['modulos']);
       allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
       allow update: if esCabeza() && soloCambia(['nombre', 'listas', 'categorias', 'alertas', 'videoVoto', 'tiposGestion', 'espacios', 'disputas']);
 
       // ---------- Usuarios ----------
       match /usuarios/{uid} {
-        allow read: if miembro() && (esCabeza() || enMiEquipo(resource.data.path));
+        allow read: if dueno() || (miembro() && (esCabeza() || enMiEquipo(resource.data.path)));
         allow create: if request.auth != null && request.resource.data.uid == uid && (
           // la primera cabeza, al crear la campaña
           (uid == request.auth.uid
@@ -95,7 +103,7 @@ service cloud.firestore {
       // ---------- Padrón (en baldes por los últimos 3 dígitos del DNI) ----------
       match /padron/{balde} {
         // los fiscales solo ven el resumen (nombres de escuelas), no los datos de los electores
-        allow read: if gestor() || (miembro() && balde == 'resumen');
+        allow read: if dueno() || gestor() || (miembro() && balde == 'resumen');
         allow write: if esCabeza();
       }
 
@@ -107,8 +115,8 @@ service cloud.firestore {
         function sinDisputa() { return !('disputa' in request.resource.data) && !('pathsDisputa' in request.resource.data) && !('enDisputa' in request.resource.data); }
 
         // get de un DNI que no existe: se permite para saber que está libre
-        allow get: if gestor() && (resource == null || esCabeza() || enMiEquipo(resource.data.path) || enDisputa());
-        allow list: if gestor() && (esCabeza() || enMiEquipo(resource.data.path) || enDisputa());
+        allow get: if dueno() || (gestor() && (resource == null || esCabeza() || enMiEquipo(resource.data.path) || enDisputa()));
+        allow list: if dueno() || (gestor() && (esCabeza() || enMiEquipo(resource.data.path) || enDisputa()));
 
 
         // Se carga a nombre propio o de alguien de mi equipo, con el path real de ese dueño
@@ -167,7 +175,7 @@ service cloud.firestore {
       match /gestiones/{gid} {
         // también la ven quienes la tuvieron en sus manos (y sus superiores): pathsRecorrido
         function enRecorrido() { return request.auth.uid in resource.data.get('pathsRecorrido', []); }
-        allow read: if gestor() && (esCabeza() || enMiEquipo(resource.data.path) || enRecorrido());
+        allow read: if dueno() || (gestor() && (esCabeza() || enMiEquipo(resource.data.path) || enRecorrido()));
         allow create: if gestor()
           && get(ruta('')).data.modulos.gestiones == true
           && request.resource.data.cargadoPor == request.auth.uid
@@ -200,7 +208,7 @@ service cloud.firestore {
 
       // ---------- Conflictos: intentos de cargar a alguien que ya es de otro ----------
       match /conflictos/{id} {
-        allow read: if gestor() && (esCabeza() || enMiEquipo(resource.data.byPath));
+        allow read: if dueno() || (gestor() && (esCabeza() || enMiEquipo(resource.data.byPath)));
         allow create: if gestor()
           && request.resource.data.byId == request.auth.uid
           && request.resource.data.byPath == yo().path
@@ -213,7 +221,7 @@ service cloud.firestore {
 
       // ---------- Ubicación del día de la elección: cada uno publica la suya; la ven sus superiores ----------
       match /ubicaciones/{uid} {
-        allow read: if gestor() && (esCabeza() || enMiEquipo(resource.data.path));
+        allow read: if dueno() || (gestor() && (esCabeza() || enMiEquipo(resource.data.path)));
         allow create, update: if miembro() && request.auth.uid == uid && request.resource.data.path == yo().path;
         allow delete: if request.auth != null && request.auth.uid == uid;
       }
@@ -221,14 +229,14 @@ service cloud.firestore {
       // ---------- Fiscalización: un documento por fiscal (id = uid del fiscal) ----------
       function rutaFiscal(fid) { return usuario(fid).path; }
       match /fiscalias/{fid} {
-        allow read: if miembro() && (esCabeza() || enMiEquipo(resource.data.path));
+        allow read: if dueno() || (miembro() && (esCabeza() || enMiEquipo(resource.data.path)));
         allow create, update: if miembro()
           && request.resource.data.path == rutaFiscal(fid)
           && (esCabeza() || enMiEquipo(rutaFiscal(fid)));
       }
       // Foto del acta (aparte, porque pesa)
       match /actas/{fid} {
-        allow read: if miembro() && (esCabeza() || enMiEquipo(resource.data.path));
+        allow read: if dueno() || (miembro() && (esCabeza() || enMiEquipo(resource.data.path)));
         allow create, update: if miembro()
           && request.resource.data.path == rutaFiscal(fid)
           && (esCabeza() || enMiEquipo(rutaFiscal(fid)));

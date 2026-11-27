@@ -6,7 +6,16 @@ import {
 import { abrirMapa } from './mapa.js';
 import { leerArchivo, mapearPersonas, mapearPadron, exportarExcel, exportarGestiones, NOMBRE_COLUMNA } from './importers.js';
 
-const S = FIREBASE_CONFIG ? await import('./store-firebase.js') : await import('./store-demo.js');
+const S0 = FIREBASE_CONFIG ? await import('./store-firebase.js') : await import('./store-demo.js');
+// Cuando el dueño de la app mira una campaña, todo lo que escribe queda bloqueado (solo lectura)
+const ESCRIBE = /^(crear|actualizar|guardar|dejar|cambiar|blanquear|quitar|importar|recalcular|disputar|cargarPersona|transferir|eliminar|reclamar|resolver|borrar|subir|pasar|confirmar|entregar|agregar)/;
+const S = new Proxy(S0, { get(t, k) {
+  const v = t[k];
+  if (typeof v === 'function' && typeof k === 'string' && ESCRIBE.test(k) && globalThis.__soloLectura) {
+    return () => Promise.reject(Object.assign(new Error('Estás mirando esta campaña como dueño: es solo lectura, no se puede cambiar nada.'), { code: 'solo-lectura' }));
+  }
+  return v;
+} });
 const DEMO = S.modo === 'demo';
 
 // ---------------------------------------------------------------- estado
@@ -178,6 +187,7 @@ const I = {
   ok: '<path d="M5 12.5l4.5 4.5L19 7"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   atras: '<path d="M15 5l-7 7 7 7"/>',
+  ojo: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   capas: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   llave: '<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2.5 2.5M14 9l2 2"/>',
   alerta: '<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4.5M12 17.5v.3"/>',
@@ -253,6 +263,8 @@ async function boot() {
 }
 
 function iniciarSesion(me) {
+  globalThis.__soloLectura = !!me.soloLectura;
+  if (me.rol === 'dueno') { st.me = me; pintarDueno(); return; }
   st.me = me;
   st.tab = 'gente';
   try { history.replaceState({ tab: 'gente' }, ''); } catch { /* */ }
@@ -271,7 +283,40 @@ function iniciarSesion(me) {
       ...(['cabeza', 'encargado', 'dirigente'].includes(me.rol) ? [S.watchUbicaciones((x) => { st.ubic = x; if (st.tab === 'dia' || sheetCtx?.tipo === 'usuario') refrescar(); })] : [])
     ];
   pintar();
-  if (puedeCompartir() && gpsGuardado()) iniciarGps();
+  if (!me.soloLectura && puedeCompartir() && gpsGuardado()) iniciarGps();
+}
+
+// ----- Panel del dueño de la app: todas las campañas, para mirar y para prender módulos
+async function pintarDueno() {
+  const app = $('#app');
+  app.className = '';
+  app.innerHTML = `
+    <header class="top"><div class="top-row"><span class="top-logo">${isotipo(26)}</span>
+      <div class="top-titulo"><div class="top-sub">Dueño de la app · ${esc(APP_NAME)}</div><h1>Campañas</h1></div>
+      <button type="button" class="avatar" data-act="salir" aria-label="Cerrar sesión" title="Cerrar sesión">${ic('x', 18)}</button></div></header>
+    <main><div class="aviso info">${ic('ojo', 18)}<span>Podés entrar a cualquier campaña <b>solo para mirar</b>: no se puede cambiar nada desde tu cuenta. Los módulos sí los prendés o apagás acá.</span></div>
+      <div id="d-lista" class="stack"><div class="vacio">Cargando campañas…</div></div></main>`;
+  try {
+    const cs = (await S.listarCampanias()).sort((a, b) => (b.personas || 0) - (a.personas || 0));
+    st.duenoCamps = cs;
+    const n = (x) => (x == null ? '–' : fmtN(x));
+    $('#d-lista').innerHTML = cs.length ? cs.map((c) => `<div class="card pad stack">
+        <div class="row"><div class="grow"><h3>${esc(c.nombre)}</h3><div class="muted small">${c.creado ? 'Creada el ' + new Date(c.creado).toLocaleDateString('es-AR') : ''}</div></div>
+          <button type="button" class="btn btn-sm" data-act="dueno-entrar" data-cid="${esc(c.cid)}">Entrar a mirar</button></div>
+        <div class="tiles"><div class="tile t-acc"><b>${n(c.personas)}</b><span>personas cargadas</span></div><div class="tile t-neutral"><b>${n(c.usuarios)}</b><span>usuarios</span></div></div>
+        <div class="row wrap" style="gap:8px"><span class="muted small">Módulos:</span>
+          ${[['gestiones', 'Gestiones'], ['video', 'Video de voto']].map(([k, l]) => `<button type="button" class="chip" data-act="dueno-modulo" data-cid="${esc(c.cid)}" data-k="${k}" aria-pressed="${!!c.modulos[k]}">${l}: ${c.modulos[k] ? 'sí' : 'no'}</button>`).join('')}</div>
+      </div>`).join('') : '<div class="vacio">Todavía no hay campañas.</div>';
+  } catch (e) { $('#d-lista').innerHTML = `<div class="aviso bad">${ic('alerta', 18)}<span>${esc(mensajeError(e))}</span></div>`; }
+}
+async function volverAlPanelDueno() {
+  st.gest.unsub?.(); st.gest.unsub = null; st.gest.clave = ''; st.gest.lista = []; st.gest.unsubMano?.(); st.gest.unsubMano = null;
+  st.unsubs.forEach((u) => u()); st.unsubs = [];
+  st.unsubPagina?.(); st.unsubPagina = null; st.clavePagina = null; cachePersonas.clear();
+  for (const k in conteos) delete conteos[k];
+  st.usuarios = []; st.personas = []; st.conflictos = []; st.fiscalias = [];
+  cerrarHoja();
+  iniciarSesion(S.volverAlPanel());
 }
 
 async function salir() {
@@ -377,6 +422,7 @@ function pintar() {
   app.className = 'shell';
   app.innerHTML = `
     ${DEMO ? '<div class="demo-band">Modo demostración · los datos son inventados</div>' : ''}
+    ${st.me.soloLectura ? `<div class="demo-band dueno-band">Mirando <b>${esc(st.me.campania)}</b> como dueño · solo lectura <button type="button" data-act="dueno-volver">Volver a campañas</button></div>` : ''}
     <header class="top" id="top"></header>
     <main id="main" data-tab="${st.tab}"></main>
     <nav class="tabs" aria-label="Secciones">
@@ -422,7 +468,7 @@ function pintarTop() {
   const me = st.me;
   const s = statsGlobal();
   const titulos = { gente: esMov() ? 'Mi gente' : 'Gente del equipo', cargar: 'Cargar persona', dia: 'Día de elección', equipo: 'Equipo', panel: 'Panel', gestiones: 'Gestiones' };
-  const sub = `${ROL_LABEL[me.rol]}${me.circuito ? ' · ' + esc(textoCircuitos(me, true)) : ''} · ${esc(me.campania || '')}`;
+  const sub = `${me.soloLectura ? 'Dueño · solo lectura' : ROL_LABEL[me.rol]}${me.circuito ? ' · ' + esc(textoCircuitos(me, true)) : ''} · ${esc(me.campania || '')}`;
   let extra = '';
   if (st.tab === 'gente') {
     extra = `<div class="kpis">
@@ -2404,7 +2450,16 @@ const acciones = {
   'ir-crear': () => { st.login = 'crear'; pintarLogin(); },
   'ir-entrar': () => { st.login = 'entrar'; pintarLogin(); },
   tab: (el) => { cerrarHoja(); navegar(el.dataset.tab); pintar(); if (st.tab === 'cargar') $('#c-dni')?.focus(); },
-  cuenta: hojaCuenta,
+  cuenta: () => (st.me?.soloLectura ? volverAlPanelDueno() : hojaCuenta()),
+  'dueno-entrar': async (el) => { el.disabled = true; try { iniciarSesion(await S.verCampania(el.dataset.cid)); } catch (e) { el.disabled = false; toast(mensajeError(e)); } },
+  'dueno-volver': () => volverAlPanelDueno(),
+  'dueno-modulo': async (el) => {
+    const c = (st.duenoCamps || []).find((x) => x.cid === el.dataset.cid); if (!c) return;
+    const k = el.dataset.k; const mods = { ...c.modulos, [k]: !c.modulos[k] };
+    el.disabled = true;
+    try { await S.guardarModulos(c.cid, mods); c.modulos = mods; el.setAttribute('aria-pressed', !!mods[k]); el.textContent = `${k === 'video' ? 'Video de voto' : 'Gestiones'}: ${mods[k] ? 'sí' : 'no'}`; toast(`${c.nombre}: ${k === 'video' ? 'video de voto' : 'gestiones'} ${mods[k] ? 'activado' : 'desactivado'}`); }
+    catch (e) { toast(mensajeError(e)); } finally { el.disabled = false; }
+  },
   instalar: () => instalarApp(),
   tema: (el) => {
     const v = el.dataset.v;
