@@ -430,6 +430,9 @@ export async function guardarGestion(g) {
   }
   db.gestiones[id] = x; guardar(); return id;
 }
+export async function ultimosVotos(n = 15) {
+  return Object.values(db.personas).filter((p) => p.voto && p.votoAt && (me.rol === 'cabeza' || p.path.includes(me.uid))).sort((a, b) => b.votoAt - a.votoAt).slice(0, n);
+}
 export function watchGestionesEnMano(cb) {
   const f = () => cb(Object.values(db.gestiones || {}).filter((g) => g.tieneId === me.uid && g.estado === 'en_camino'));
   subs.add(f); f();

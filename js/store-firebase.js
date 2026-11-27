@@ -9,7 +9,7 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore,
   doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, query, where, onSnapshot,
-  writeBatch, serverTimestamp, getCountFromServer, getDocs, arrayUnion, limit, deleteField, Timestamp
+  writeBatch, serverTimestamp, getCountFromServer, getDocs, arrayUnion, limit, deleteField, Timestamp, orderBy
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 export const modo = 'firebase';
@@ -539,6 +539,11 @@ export function watchGestiones(filtro, cb, alError) {
   return () => { u1(); u2(); };
 }
 // Gestiones que tengo en mano para entregar (de cualquier fecha)
+// Centro de comando: los últimos que marcaron "Ya votó" (solo cabeza)
+export async function ultimosVotos(n = 15) {
+  const s = await getDocs(query(C('personas'), orderBy('votoAt', 'desc'), limit(n)));
+  return s.docs.map((d) => d.data()).filter((p) => p.voto && p.votoAt);
+}
 export function watchGestionesEnMano(cb) {
   // (pathsRecorrido incluye al que la tiene: así las reglas pueden comprobar que puede verla)
   return onSnapshot(query(C('gestiones'), where('pathsRecorrido', 'array-contains', me.uid), where('tieneId', '==', me.uid), where('estado', '==', 'en_camino')),

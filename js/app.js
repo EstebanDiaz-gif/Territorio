@@ -226,6 +226,7 @@ function navegar(tab) { // cambio de sección con el botón de abajo
 window.addEventListener('popstate', (e) => {
   if (popsPropios > 0) { popsPropios--; return; }
   if (hojaEnHistorial || $('.sheet-fondo')) { hojaEnHistorial = false; quitarHoja(); return; }
+  if (cc.abierto) { cerrarCC(false); return; }
   const m = document.querySelector('.mapa-full');
   if (m) { if (m._atras?.()) { try { history.pushState({ mapa: 1 }, ''); } catch { /* */ } } else m._cerrar?.(); return; }
   if (!st.me) return;
@@ -506,6 +507,131 @@ function refrescarPartes() {
   if (st.tab === 'equipo') pintarEquipo();
   if (st.tab === 'gestiones') pintarGestiones();
   if (st.tab === 'panel') { cargarResumen(); pintarTablero(); pintarFiscalizacion(); pintarConflictos(); pintarDisputas(); }
+  if (cc.abierto) pintarCC();
+}
+
+// ---------------------------------------------------------------- CENTRO DE COMANDO (día de la elección, pantalla grande)
+// Solo junta y muestra datos que la app ya tiene: avance de la votación, equipo en la calle, fiscales, actas, incidencias.
+const cc = { abierto: false, votos: [], tVotos: 0, timer: null, cat: null, actualizado: 0 };
+const COLORES_LISTA = ['#3B82F6', '#10B981', '#F43F5E', '#A855F7', '#F59E0B', '#06B6D4', '#84CC16', '#EC4899'];
+function abrirCC() {
+  if (cc.abierto) return;
+  cc.abierto = true;
+  const el = document.createElement('div');
+  el.className = 'cc-full'; el.id = 'cc'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Centro de comando');
+  document.body.appendChild(el); document.body.style.overflow = 'hidden';
+  try { history.pushState({ tab: st.tab, cc: 1 }, ''); } catch { /* */ }
+  cargarResumen();
+  pintarCC();
+  cc.timer = setInterval(() => { invalidarConteos(); pintarCC(); }, 20000);
+}
+function cerrarCC(porBoton) {
+  if (!cc.abierto) return;
+  cc.abierto = false; clearInterval(cc.timer);
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  $('#cc')?.remove(); document.body.style.overflow = '';
+  if (porBoton) volverSolo();
+}
+function cargarVotosCC() {
+  if (Date.now() - cc.tVotos < 25000) return;
+  cc.tVotos = Date.now();
+  S.ultimosVotos(15).then((x) => { cc.votos = x; if (cc.abierto) pintarCC(); }).catch(() => {});
+}
+function donaCC(v, n) {
+  const p = n ? v / n : 0; const r = 70; const L = 2 * Math.PI * r;
+  return `<svg viewBox="0 0 180 180" class="cc-dona" role="img" aria-label="${pct(v, n)}% ya votó">
+    <defs><linearGradient id="ccv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34D399"/><stop offset="1" stop-color="#059669"/></linearGradient></defs>
+    <circle cx="90" cy="90" r="${r}" fill="none" stroke="rgba(251,191,36,.35)" stroke-width="20"/>
+    <circle cx="90" cy="90" r="${r}" fill="none" stroke="url(#ccv)" stroke-width="20" stroke-linecap="round" stroke-dasharray="${(L * p).toFixed(1)} ${L.toFixed(1)}" transform="rotate(-90 90 90)"/>
+  </svg>`;
+}
+function pintarCC() {
+  const el = $('#cc'); if (!el) return;
+  cargarVotosCC();
+  const s = statsGlobal();
+  const falta = s.total != null && s.voto != null ? s.total - s.voto : null;
+  const fs = st.fiscalias || [];
+  const presentes = fs.filter((f) => f.presente).length;
+  const incids = fs.flatMap((f) => (f.incidencias || []).map((i) => ({ ...i, f })));
+  const mesasConInc = new Set(incids.map((i) => i.f.mesa).filter(Boolean)).size;
+  const mesasAsignadas = new Set(fs.map((f) => f.mesa).filter(Boolean)).size;
+  const conActa = new Set(fs.filter((f) => f.mesa && Object.keys(catsDeActa(f.acta)).length).map((f) => f.mesa)).size;
+  const hace15 = Date.now() - 15 * 60000;
+  const enCalle = (st.ubic || []).filter((u) => ms(u.at) > hace15).length;
+  const equipo = st.usuarios.filter((u) => ['encargado', 'dirigente', 'movilizador'].includes(u.rol)).length;
+  const cs = categorias(); const cat = cs.some((c) => c.id === cc.cat) ? cc.cat : cs[0].id;
+  const r = calcularEscrutinio(fs, cat);
+  const listas = st.me.listas || [];
+  const validos = Object.values(r.tot).reduce((a, b) => a + b, 0) + r.blancos;
+  const filas = listas.map((l, i) => ({ n: l.nombre, v: r.tot[l.id] || 0, c: COLORES_LISTA[i % COLORES_LISTA.length] })).sort((a, b) => b.v - a.v);
+  const maxV = Math.max(1, ...filas.map((f) => f.v), r.blancos);
+  const { lista: flojos } = alertasParaMi();
+  // actividad reciente: votos, llegadas de fiscales, actas e incidencias
+  const ev = [
+    ...cc.votos.map((p) => ({ t: p.votoAt, ic: 'ok', cls: 'ok', txt: `<b>${esc(p.nombre)}</b> ya votó`, sub: `de ${esc(p.ownerNombre || '')}${p.escuela ? ' · ' + esc(p.escuela) : ''}` })),
+    ...fs.filter((f) => f.presente && f.presenteAt).map((f) => ({ t: ms(f.presenteAt), ic: 'fiscal', cls: 'acc', txt: `<b>${esc(f.nombre)}</b> llegó a su mesa`, sub: `Mesa ${esc(f.mesa || '–')}${f.escuela ? ' · ' + esc(f.escuela) : ''}` })),
+    ...fs.filter((f) => f.actaAt).map((f) => ({ t: ms(f.actaAt), ic: 'panel', cls: 'azul', txt: `Acta cargada · <b>Mesa ${esc(f.mesa || '–')}</b>`, sub: `por ${esc(f.nombre)}` })),
+    ...incids.map((i) => ({ t: ms(i.at), ic: 'alerta', cls: 'bad', txt: `Incidencia · <b>Mesa ${esc(i.f.mesa || '–')}</b>`, sub: esc(i.texto) }))
+  ].filter((x) => x.t).sort((a, b) => b.t - a.t).slice(0, 14);
+  const hhmm = (t) => new Date(t).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  cc.actualizado = Date.now();
+  const kpi = (color, icono, titulo, grande, chicoT, chico, sub) => `<div class="cc-kpi" style="--k:${color}">
+      <div class="cc-kpi-h"><span class="cc-kpi-ic">${ic(icono, 20)}</span><span>${titulo}</span></div>
+      <div class="cc-kpi-b"><b class="cc-num">${grande}</b>${chicoT ? `<div class="cc-mini"><span>${chicoT}</span><b>${chico}</b></div>` : ''}</div>
+      <div class="cc-kpi-s">${sub}</div></div>`;
+  el.innerHTML = `
+    <header class="cc-top">
+      <div class="cc-marca">${isotipo(30)}<div><b>${esc(APP_NAME)}</b><span>Centro de comando</span></div></div>
+      <div class="cc-titulo"><h1>${esc(st.me.campania || 'Campaña')}</h1>
+        ${cs.length > 1 ? `<div class="chips" role="group" aria-label="Categoría">${cs.map((c) => `<button type="button" class="chip" data-act="cc-cat" data-c="${c.id}" aria-pressed="${c.id === cat}">${esc(c.nombre)}</button>`).join('')}</div>` : ''}</div>
+      <div class="cc-acc">
+        <span class="cc-live"><i class="cc-dot"></i> EN VIVO</span>
+        <span class="cc-hora">Actualizado ${hhmm(cc.actualizado)}</span>
+        <button type="button" class="cc-btn" data-act="cc-pantalla">${document.fullscreenElement ? 'Salir de pantalla completa' : 'Pantalla completa'}</button>
+        <button type="button" class="cc-btn icono" data-act="cc-cerrar" aria-label="Cerrar">${ic('x', 20)}</button>
+      </div>
+    </header>
+    <div class="cc-grid">
+      <section class="cc-kpis">
+        ${kpi('#3B82F6', 'mapa', 'Equipo en la calle', fmtN(enCalle), 'Equipo', fmtN(equipo), 'compartiendo ubicación (últimos 15 min)')}
+        ${kpi('#A855F7', 'fiscal', 'Fiscales', `${presentes}<small>/${fs.length}</small>`, 'Sin llegar', fs.length - presentes, 'ya sentados en su mesa')}
+        ${kpi('#F43F5E', 'alerta', 'Incidencias', incids.length, 'Mesas', mesasConInc, 'reportadas por los fiscales')}
+        ${kpi('#10B981', 'panel', 'Actas', `${conActa}<small>/${mesasAsignadas}</small>`, 'Faltan', Math.max(0, mesasAsignadas - conActa), 'mesas fiscalizadas con acta cargada')}
+      </section>
+      <section class="cc-card cc-votos">
+        <div class="cc-card-h"><span class="cc-card-ic" style="--k:#F59E0B">${ic('dia', 20)}</span><div><h2>Ya votaron vs. cargados</h2><p>Tu gente: verde ya votó, ámbar falta</p></div></div>
+        <div class="cc-votos-b">
+          <div class="cc-dona-w">${donaCC(s.voto || 0, s.total || 0)}<div class="cc-dona-c"><span>YA VOTÓ</span><b>${pct(s.voto, s.total)}%</b><small>${fmtN(s.voto)} de ${fmtN(s.total)}</small></div></div>
+          <div class="cc-lado">
+            <div class="cc-dato"><span><i style="background:#10B981"></i>Votaron</span><b>${fmtN(s.voto)}</b></div>
+            <div class="cc-dato"><span><i style="background:#FBBF24"></i>Faltan</span><b>${fmtN(falta)}</b></div>
+            <div class="cc-dato"><span><i style="background:#F97316"></i>Traslados pendientes</span><b>${fmtN(s.trasPend)}</b></div>
+          </div>
+        </div>
+      </section>
+      <section class="cc-card cc-escr">
+        <div class="cc-card-h"><span class="cc-card-ic" style="--k:#3B82F6">${ic('panel', 20)}</span><div><h2>Escrutinio parcial</h2><p>Según las actas de tus fiscales · no es el resultado oficial</p></div>
+          <div class="cc-cob"><span>COBERTURA</span><b>${r.mesas} / ${mesasAsignadas}</b><small>mesas</small></div></div>
+        ${!listas.length ? '<div class="cc-vacio">Cargá las listas en Panel → Herramientas → Listas del escrutinio.</div>'
+          : !r.mesas ? '<div class="cc-vacio">Todavía ningún fiscal cargó el acta. Los resultados aparecen acá apenas lleguen.</div>'
+          : `<div class="cc-barras">${filas.map((f) => `<div class="cc-barra"><span class="cc-bn">${esc(f.n)}</span><div class="cc-bt"><i style="width:${(f.v * 100 / maxV).toFixed(1)}%;background:${f.c}"><b>${f.v.toLocaleString('es-AR')}</b></i></div><span class="cc-bp">${validos ? (f.v * 100 / validos).toFixed(1).replace('.', ',') : '0'}%</span></div>`).join('')}
+            <div class="cc-barra gris"><span class="cc-bn">En blanco</span><div class="cc-bt"><i style="width:${(r.blancos * 100 / maxV).toFixed(1)}%"><b>${r.blancos.toLocaleString('es-AR')}</b></i></div><span class="cc-bp">${validos ? (r.blancos * 100 / validos).toFixed(1).replace('.', ',') : '0'}%</span></div></div>
+            <div class="cc-pie">Nulos ${r.nulos} · Recurridos e impugnados ${r.otros}</div>`}
+      </section>
+      <section class="cc-card cc-circ">
+        <div class="cc-card-h"><span class="cc-card-ic" style="--k:#10B981">${ic('equipo', 20)}</span><div><h2>Avance por circuito</h2><p>Tocá un circuito para ver sus escuelas</p></div></div>
+        ${flojos.length ? `<div class="cc-flojos"><b>${flojos.length} ${flojos.length === 1 ? 'viene' : 'vienen'} flojos:</b> ${flojos.slice(0, 6).map((a) => `${esc(primerNombre(a.u.nombre))} <span>${a.p}%</span>`).join(' · ')}</div>` : ''}
+        <div class="cc-circ-l">${bloqueCircuitos({}) || '<div class="cc-vacio">Cuando subas el padrón vas a ver cada circuito.</div>'}</div>
+      </section>
+      <section class="cc-card cc-inc">
+        <div class="cc-card-h"><span class="cc-card-ic" style="--k:#F43F5E">${ic('alerta', 20)}</span><div><h2>Incidencias</h2><p>${incids.length ? `${incids.length} en ${mesasConInc} ${mesasConInc === 1 ? 'mesa' : 'mesas'}` : 'Sin incidencias por ahora'}</p></div></div>
+        <div class="cc-lista">${[...incids].sort((a, b) => ms(b.at) - ms(a.at)).slice(0, 8).map((i) => `<div class="cc-item"><span class="cc-h">${hhmm(ms(i.at))}</span><div><b>Mesa ${esc(i.f.mesa || '–')}</b>${i.f.escuela ? ` · ${esc(i.f.escuela)}` : ''}<p>${esc(i.texto)}</p></div></div>`).join('') || '<div class="cc-vacio">Todo tranquilo.</div>'}</div>
+      </section>
+      <section class="cc-card cc-feed">
+        <div class="cc-card-h"><span class="cc-card-ic" style="--k:#A855F7">${ic('gente', 20)}</span><div><h2>Lo último que pasó</h2><p>Votos, fiscales, actas e incidencias</p></div></div>
+        <div class="cc-lista">${ev.map((x) => `<div class="cc-item"><span class="cc-h">${hhmm(x.t)}</span><span class="cc-ev ${x.cls}">${ic(x.ic, 14)}</span><div>${x.txt}<p>${x.sub}</p></div></div>`).join('') || '<div class="cc-vacio">Acá va apareciendo la actividad del día.</div>'}</div>
+      </section>
+    </div>`;
 }
 
 // ---------------------------------------------------------------- GENTE
@@ -1651,6 +1777,10 @@ function vistaPanel() {
     </details>`;
   const subir = (pre, texto) => `<label class="archivo" for="${pre}-file">${ic('subir', 22)}<div><b>${texto}</b></div><input id="${pre}-file" type="file" accept=".xlsx,.xls,.csv,.docx,.ods"></label><div id="${pre}-res" class="stack"></div>`;
   return `
+    ${st.me.rol === 'cabeza' ? `<button type="button" class="cc-abrir" data-act="cc-abrir">
+      <span class="cc-abrir-ic">${ic('panel', 24)}</span>
+      <span class="grow"><b>Centro de comando</b><span class="muted small" style="display:block">Todo el día de la elección en una pantalla, en vivo. Ideal para la compu o un televisor.</span></span>
+      <span class="pill p-ok"><i class="cc-dot"></i> En vivo</span></button>` : ''}
     <div id="tablero" class="stack"></div>
     <div id="fiscalizacion" class="stack"></div>
     <div id="conflictos"></div>
@@ -2460,6 +2590,13 @@ const acciones = {
   cuenta: () => (st.me?.soloLectura ? volverAlPanelDueno() : hojaCuenta()),
   'dueno-entrar': async (el) => { el.disabled = true; try { iniciarSesion(await S.verCampania(el.dataset.cid)); } catch (e) { el.disabled = false; toast(mensajeError(e)); } },
   'dueno-volver': () => volverAlPanelDueno(),
+  'cc-abrir': () => abrirCC(),
+  'cc-cerrar': () => cerrarCC(true),
+  'cc-cat': (el) => { cc.cat = el.dataset.c; pintarCC(); },
+  'cc-pantalla': async () => {
+    try { if (document.fullscreenElement) await document.exitFullscreen(); else await $('#cc').requestFullscreen(); } catch { toast('Este navegador no permite pantalla completa'); }
+    setTimeout(pintarCC, 200);
+  },
   'dueno-modulo': async (el) => {
     const c = (st.duenoCamps || []).find((x) => x.cid === el.dataset.cid); if (!c) return;
     const k = el.dataset.k; const mods = { ...c.modulos, [k]: !c.modulos[k] };
