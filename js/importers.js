@@ -1,6 +1,6 @@
 // Lectura de planillas: Excel (.xlsx/.xls), CSV y Word (.docx con tablas).
 // Detecta qué columna es cada dato aunque cambien los títulos o el orden.
-import { normDni, dniValido } from './roles.js';
+import { normDni, dniValido, normCirc } from './roles.js';
 
 const LIBS = {
   XLSX: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
@@ -104,7 +104,7 @@ function leerEncabezados(lineas) {
   }
   const titulo = lineas.join(' ');
   const circ = meta.circuito || (titulo.match(/circuito\s*(\d+)/i) || [])[1] || '';
-  return { meta, titulo, circuito: normDni(circ) || circ };
+  return { meta, titulo, circuito: normCirc(circ) };
 }
 
 const celda = (fila, col) => (col === undefined ? '' : String(fila[col] ?? '').trim());
@@ -162,7 +162,7 @@ export function mapearPersonas(leido, { fiscales = false } = {}) {
       tel: telDig,
       domicilio: f.domicilio,
       escuela: f.escuela, dirEscuela: f.dirEscuela, mesa: f.mesa,
-      circuito: normDni(f.circuito) || info.circuito || '',
+      circuito: normCirc(f.circuito) || info.circuito || '',
       tipo: esFiscales ? (f.suplente ? 'fiscal_suplente' : 'fiscal') : 'votante',
       revisar: avisos.length > 0,
       nota: avisos.length ? 'Revisar: ' + avisos.join(', ') : ''
@@ -182,7 +182,7 @@ export function mapearPadron(leido, circuitoPorDefecto = '') {
     if (!dniValido(f.dni)) { invalidos++; continue; }
     registros.push({
       dni: f.dni, nombre: f.nombre, domicilio: f.domicilio,
-      circuito: normDni(f.circuito) || f.circuito || circuitoPorDefecto || info.circuito || '',
+      circuito: normCirc(f.circuito) || circuitoPorDefecto || info.circuito || '',
       escuela: f.escuela, dirEscuela: f.dirEscuela, mesa: f.mesa, orden: f.orden
     });
   }

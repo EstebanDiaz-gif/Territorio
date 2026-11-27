@@ -39,9 +39,17 @@ export const TIPO_LABEL = Object.fromEntries(TIPOS);
 
 export const normDni = (s) => String(s ?? '').replace(/\D/g, '');
 // Circuitos a cargo: un encargado puede tener varios ("19, 20"). Se guardan como texto separado por comas.
+// Un circuito puede llevar letra: 19, 19A, 19B… 18G. Se guarda siempre igual: "19A" (sin espacios, mayúscula, sin ceros adelante).
+export function normCirc(s) {
+  const t = String(s ?? '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(CIRCUITOS?|CIRC|CTO)\b\.?/g, '').replace(/[^0-9A-Z]/g, '');
+  const m = t.match(/^0*(\d+)([A-Z]{0,2})$/);
+  return m ? m[1] + m[2] : t;
+}
 export function circuitosDe(x) {
   const s = typeof x === 'string' ? x : (x?.circuito || '');
-  return [...new Set(String(s).split(/\s*(?:,|;|\/|\s+y\s+|\s)\s*/i).map((c) => normDni(c) || c.trim().toUpperCase()).filter(Boolean))];
+  return [...new Set(String(s).split(/\s*(?:,|;|\/|\s+y\s+)\s*/i)
+    .flatMap((c) => c.split(/\s+(?=\d)/)).map(normCirc).filter(Boolean))];
 }
 export const unCircuito = (x) => { const cs = circuitosDe(x); return cs.length === 1 ? cs[0] : ''; };
 export function textoCircuitos(x, corto = false) {

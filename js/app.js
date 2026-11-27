@@ -1,7 +1,7 @@
 import { APP_NAME, FIREBASE_CONFIG, ZONA } from './config.js';
 import {
   ROLES, ROL_LABEL, ROL_CORTO, nivel, rolAbajo, ESTADOS, ESTADO_LABEL, TIPOS, TIPO_LABEL,
-  normDni, dniValido, fmtDni, telWhatsApp, idLista, palabrasDe, circuitosDe, unCircuito, textoCircuitos
+  normDni, dniValido, fmtDni, telWhatsApp, idLista, palabrasDe, circuitosDe, unCircuito, textoCircuitos, normCirc
 } from './roles.js';
 import { abrirMapa } from './mapa.js';
 import { leerArchivo, mapearPersonas, mapearPadron, exportarExcel, exportarGestiones, NOMBRE_COLUMNA } from './importers.js';
@@ -703,8 +703,7 @@ function resultadoCargar() {
   // libre
   const pd = c.padron;
   const misCircs = circuitosDe(st.me);
-  const sinCeros = (c) => String(c).replace(/^0+(?=.)/, '');
-  const otroCirc = pd && misCircs.length && pd.circuito && !misCircs.map(sinCeros).includes(sinCeros(normDni(pd.circuito) || pd.circuito));
+  const otroCirc = pd && misCircs.length && pd.circuito && !misCircs.includes(normCirc(pd.circuito));
   const duenos = esMov() ? [] : [st.me, ...miEquipo()];
   return `
     ${pd ? `<div class="card">
@@ -1418,7 +1417,7 @@ function hojaQuitarUsuario(uid) {
     </div>
     ${u.rol !== 'cabeza' ? `<div class="card pad stack">
       <div><label class="label" for="qu-circ">Circuitos a cargo</label>
-        <input id="qu-circ" class="input" inputmode="text" autocomplete="off" value="${esc(circuitosDe(u).join(', '))}" placeholder="Ej: 19, 20">
+        <input id="qu-circ" class="input" inputmode="text" autocomplete="off" value="${esc(circuitosDe(u).join(', '))}" placeholder="Ej: 19, 19A, 20">
         <div class="muted small">Si maneja más de uno, separalos con coma.${st.usuarios.some((x) => x.uid !== u.uid && x.path.includes(u.uid)) ? ' Su equipo toma los mismos circuitos.' : ''}</div></div>
       <div class="error" id="qu-circ-err" role="alert"></div>
       <button class="btn btn-sec" data-act="eq-circ" data-uid="${u.uid}">Guardar circuitos</button>
@@ -1448,7 +1447,7 @@ function hojaNuevoUsuario(rol, padreUid) {
       <div><label class="label" for="nu-dni">DNI (con esto entra a la app)</label><input id="nu-dni" class="input" inputmode="numeric" required></div>
       <div><label class="label" for="nu-tel">Teléfono</label><input id="nu-tel" class="input" inputmode="tel" placeholder="381…"></div>
       <div><label class="label" for="nu-dom">Domicilio <span class="muted">(opcional)</span></label><input id="nu-dom" class="input" maxlength="120" autocomplete="off" placeholder="Calle y número, barrio"></div>
-      ${rol === 'encargado' ? '<div><label class="label" for="nu-circ">Circuitos a cargo</label><input id="nu-circ" class="input" inputmode="text" autocomplete="off" required placeholder="Ej: 19 · si son varios: 19, 20, 21"><div class="muted small">Si maneja más de un circuito, separalos con coma.</div></div>' : ''}
+      ${rol === 'encargado' ? '<div><label class="label" for="nu-circ">Circuitos a cargo</label><input id="nu-circ" class="input" inputmode="text" autocomplete="off" required placeholder="Ej: 19 o 19A · si son varios: 19A, 19B, 20"><div class="muted small">Si maneja más de un circuito, separalos con coma.</div></div>' : ''}
       <div><label class="label" for="nu-pass">Contraseña inicial</label><input id="nu-pass" class="input num" value="${clave}" minlength="6" required></div>
       <div class="error" id="nu-err" role="alert"></div>
       <button class="btn btn-full" type="submit">Crear y compartir acceso</button>
@@ -1528,7 +1527,7 @@ function vistaPanel() {
         ${subir('fis', 'Elegir planilla de fiscales')}`)}
       ${puedePadron() ? herr('padron', 'padron', 'Padrón oficial', 'Solo cabezas' + (S.padronCantidad?.() != null ? ` · ${S.padronCantidad().toLocaleString('es-AR')} electores` : ''), `
         <div class="muted">Subí el padrón que recibe el partido (Excel o CSV). Con esto, al escribir un DNI se completan nombre, escuela, mesa y orden.</div>
-        <div><label class="label" for="pad-circ">Circuito (si el archivo no trae esa columna)</label><input id="pad-circ" class="input" inputmode="numeric" value="${esc(unCircuito(st.me))}" placeholder="Ej: 19"></div>
+        <div><label class="label" for="pad-circ">Circuito (si el archivo no trae esa columna)</label><input id="pad-circ" class="input" autocomplete="off" value="${esc(unCircuito(st.me))}" placeholder="Ej: 19 o 19A"></div>
         <label class="archivo" for="pad-file">${ic('subir', 22)}<div><b>Elegir padrón</b></div><input id="pad-file" type="file" accept=".xlsx,.xls,.csv,.ods,.docx"></label>
         <div id="pad-res" class="stack"></div>`) : ''}
       ${st.me.rol === 'cabeza' ? herr('listas', 'fiscal', 'Listas del escrutinio', 'Las que cargan los fiscales del acta', `
@@ -1809,12 +1808,12 @@ async function analizarPadron(file) {
   res.innerHTML = '<div class="muted">Leyendo padrón…</div>';
   try {
     const leido = await leerArchivo(file);
-    const m = mapearPadron(leido, normDni($('#pad-circ').value));
+    const m = mapearPadron(leido, normCirc($('#pad-circ').value));
     st.pad = m;
     const ej = m.registros.slice(0, 3);
     res.innerHTML = `
       <div class="small">Columnas: ${m.columnas.map((c) => NOMBRE_COLUMNA[c] || c).join(', ')}</div>
-      ${m.faltaCircuito && !normDni($('#pad-circ').value) ? `<div class="aviso warn">${ic('alerta', 18)}<span>El archivo no trae circuito. Escribilo arriba antes de importar.</span></div>` : ''}
+      ${m.faltaCircuito && !normCirc($('#pad-circ').value) ? `<div class="aviso warn">${ic('alerta', 18)}<span>El archivo no trae circuito. Escribilo arriba antes de importar.</span></div>` : ''}
       <div class="tiles"><div class="tile t-ok"><b>${m.registros.length.toLocaleString('es-AR')}</b><span>electores válidos</span></div>
       <div class="tile t-neutral"><b>${m.invalidos}</b><span>filas sin DNI válido</span></div></div>
       <div class="card pad small stack">${ej.map((r) => `<div><b>${esc(r.nombre)}</b> · DNI ${fmtDni(r.dni)}<br><span class="muted">${esc(r.escuela)} · Mesa ${esc(r.mesa)} · Orden ${esc(r.orden)} · Circ. ${esc(r.circuito)}</span></div>`).join('')}</div>
@@ -1828,7 +1827,7 @@ async function analizarPadron(file) {
 async function confirmarPadron() {
   const m = st.pad;
   if (!m) return;
-  const circ = normDni($('#pad-circ').value);
+  const circ = normCirc($('#pad-circ').value);
   if (circ) m.registros.forEach((r) => { if (!r.circuito) r.circuito = circ; });
   const reemplazar = !!$('#pad-reemplazar')?.checked;
   if (reemplazar && !confirm('Se va a borrar el padrón cargado y se reemplaza por este. ¿Seguimos?')) return;
