@@ -210,25 +210,26 @@ export async function buscarPadron(dni) {
   return v ? padronDeString(dni, v) : null;
 }
 
-export async function importarPadron(registros, onProgreso, { reemplazar = false } = {}) {
-  if (reemplazar) await borrarPadron();
+export async function importarPadron(registros, onProgreso, { reemplazar = false, onBorrado } = {}) {
+  if (reemplazar) await borrarPadron(onBorrado);
   const grupos = {};
   for (const r of registros) (grupos[bucketDe(r.dni)] ||= {})[r.dni] = padronAString(r);
   const claves = Object.keys(grupos);
-  // Firestore rechaza envíos de más de ~10 MB ("Transaction too big"): se manda en tandas de ~2 MB
-  const MAX_BYTES = 2_000_000; const MAX_DOCS = 100;
+  // Firestore rechaza envíos muy grandes ("Transaction too big"): se manda de a pocos documentos
+  // (cada DNI del padrón también genera entradas de índice, que cuentan para ese límite)
+  const MAX_BYTES = 400_000; const MAX_DOCS = 5;
   let hechos = 0; let i = 0;
   while (i < claves.length) {
-    const b = writeBatch(db);
+    const ops = [];
     let bytes = 0; let docs = 0; let personas = 0;
     while (i < claves.length && docs < MAX_DOCS) {
       const k = claves[i];
       const tam = JSON.stringify(grupos[k]).length * 2;
       if (docs > 0 && bytes + tam > MAX_BYTES) break;
-      b.set(D('padron', k), { v: grupos[k] }, { merge: true });
+      ops.push((b) => b.set(D('padron', k), { v: grupos[k] }, { merge: true }));
       bytes += tam; docs++; personas += Object.keys(grupos[k]).length; i++;
     }
-    await b.commit();
+    await enviarTanda(ops);
     hechos += personas;
     onProgreso?.(hechos, registros.length);
   }
@@ -409,13 +410,23 @@ export async function duenoDe(dni) {
 }
 
 // ---------- Borrado masivo (solo cabezas) ----------
-async function borrarEnTandas(refs, onProgreso) {
+// Manda varias operaciones juntas; si Firestore dice que es demasiado grande, las manda de a una.
+const muyGrande = (e) => /too big|too large|exceeds|maximum/i.test(e?.message || '') || e?.code === 'invalid-argument' || e?.code === 'resource-exhausted';
+async function enviarTanda(ops) {
+  const b = writeBatch(db);
+  ops.forEach((op) => op(b));
+  try { await b.commit(); } catch (e) {
+    if (!muyGrande(e) || ops.length === 1) throw e;
+    for (const op of ops) { const u = writeBatch(db); op(u); await u.commit(); }
+  }
+}
+// tam: cuántos documentos por envío. Los del padrón son grandes (miles de DNI con su índice),
+// así que se borran de a pocos: si no, Firestore responde "Transaction too big".
+async function borrarEnTandas(refs, onProgreso, tam = 400) {
   let hechos = 0;
-  for (let i = 0; i < refs.length; i += 400) {
-    const b = writeBatch(db);
-    refs.slice(i, i + 400).forEach((r) => b.delete(r));
-    await b.commit();
-    hechos += refs.slice(i, i + 400).length;
+  for (let i = 0; i < refs.length; i += tam) {
+    await enviarTanda(refs.slice(i, i + tam).map((r) => (b) => b.delete(r)));
+    hechos += refs.slice(i, i + tam).length;
     onProgreso?.(hechos, refs.length);
   }
 }
@@ -424,7 +435,7 @@ export function borrarPersonas(dnis, onProgreso) {
 }
 export async function borrarPadron(onProgreso) {
   const refs = [...Array.from({ length: 1000 }, (_, i) => D('padron', String(i).padStart(3, '0'))), D('padron', 'resumen')];
-  await borrarEnTandas(refs, onProgreso);
+  await borrarEnTandas(refs, onProgreso, 4);
   baldes.clear();
 }
 

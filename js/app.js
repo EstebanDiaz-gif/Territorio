@@ -340,6 +340,7 @@ function isotipo(tam = 32, fondo = 'oscuro') {
 }
 const marca = () => `<div class="marca"><div class="logo">${isotipo(32)}</div><div><b>${esc(APP_NAME)}</b><div class="muted">Tu equipo y tu gente, el día de la elección</div></div></div>`;
 
+const temaActual = () => document.documentElement.dataset.theme || 'auto';
 // ----- Instalar como app (en la compu: Chrome o Edge; en Android: Chrome)
 let pedidoInstalar = null;
 const yaInstalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -1839,7 +1840,7 @@ async function confirmarPadron() {
   };
   try {
     if (reemplazar) { const x = $('#pad-txt'); if (x) x.textContent = 'Borrando el padrón anterior…'; }
-    await S.importarPadron(m.registros, avance('Subiendo'), { reemplazar });
+    await S.importarPadron(m.registros, avance('Subiendo'), { reemplazar, onBorrado: avance('Borrando el padrón anterior:') });
     st.pad = null;
     $('#pad-file').value = '';
     cargarResumen(true);
@@ -2241,6 +2242,9 @@ function hojaCuenta() {
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
     <div class="card pad small stack"><div>Campaña: <b>${esc(me.campania)}</b></div><div class="num">DNI: <b>${fmtDni(me.dni)}</b></div></div>
     ${puedeInstalar() ? `<button class="btn btn-sec btn-full" data-act="instalar">${ic('bajar', 18)} Instalar en este ${matchMedia('(min-width: 1024px)').matches ? 'equipo' : 'celular'}</button>` : ''}
+    <div><div class="label">Apariencia</div>
+      <div class="chips" role="group" aria-label="Apariencia">${[['auto', 'Automática'], ['light', 'Clara'], ['dark', 'Oscura']].map(([k, l]) => `<button type="button" class="chip" data-act="tema" data-v="${k}" aria-pressed="${temaActual() === k}">${l}</button>`).join('')}</div>
+      <div class="muted small" style="margin-top:4px">Automática sigue la configuración del celular o la compu.</div></div>
     <button class="btn btn-sec btn-full" data-act="mi-clave">${ic('llave', 18)} Cambiar mi contraseña</button>
     <button class="btn btn-sec btn-full" data-act="salir">${DEMO ? 'Cambiar de rol' : 'Cerrar sesión'}</button>
     ${DEMO ? '<button class="btn btn-ghost" data-act="demo-reset">Volver los datos de prueba al inicio</button>' : ''}`, { tipo: 'cuenta' });
@@ -2318,6 +2322,12 @@ const acciones = {
   tab: (el) => { cerrarHoja(); navegar(el.dataset.tab); pintar(); if (st.tab === 'cargar') $('#c-dni')?.focus(); },
   cuenta: hojaCuenta,
   instalar: () => instalarApp(),
+  tema: (el) => {
+    const v = el.dataset.v;
+    try { if (v === 'auto') localStorage.removeItem('territorio-tema'); else localStorage.setItem('territorio-tema', v); } catch { /* */ }
+    if (v === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v;
+    document.querySelectorAll('[data-act=tema]').forEach((b) => b.setAttribute('aria-pressed', b === el));
+  },
   'mi-clave': hojaMiClave,
   blanquear: (el) => hojaBlanquear(el.dataset.uid),
   'blanquear-si': blanquear,
