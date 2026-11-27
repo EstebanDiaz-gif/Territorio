@@ -676,3 +676,10 @@ nav.tabs button[aria-current="page"]::before { content: ''; position: absolute; 
 #app.shell > .dueno-band { grid-column: 2; }
 @media (max-width: 1023px) { #app.shell > .dueno-band { grid-column: auto; } }
 .mapa-full .leaflet-tile-pane { filter: saturate(.45) brightness(1.05) contrast(.95); }
+/* Mapa en modo oscuro: el mismo truco del Panel Moto (OpenStreetMap invertido) */
+:root[data-theme="dark"] .mapa-full .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
+:root[data-theme="dark"] .mapa-full .leaflet-container, :root[data-theme="dark"] .mapa-lienzo { background: #0B1220; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mapa-full .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
+  :root:not([data-theme="light"]) .mapa-full .leaflet-container, :root:not([data-theme="light"]) .mapa-lienzo { background: #0B1220; }
+}

@@ -301,12 +301,12 @@ export async function abrirMapa(api) {
       ['https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }],
       ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: '© Esri · OpenStreetMap' }]
     ];
-    let fondo = 0; let fallas = 0;
+    let iFondo = 0; let fallas = 0;
     let capaFondo = L.tileLayer(...FONDOS[0]).addTo(mapa);
     const alFallar = () => {
-      if (++fallas < 6 || fondo >= FONDOS.length - 1) return;
-      fondo++; fallas = 0; mapa.removeLayer(capaFondo);
-      capaFondo = L.tileLayer(...FONDOS[fondo]).addTo(mapa); capaFondo.on('tileerror', alFallar);
+      if (++fallas < 6 || iFondo >= FONDOS.length - 1) return;
+      iFondo++; fallas = 0; mapa.removeLayer(capaFondo);
+      capaFondo = L.tileLayer(...FONDOS[iFondo]).addTo(mapa); capaFondo.on('tileerror', alFallar);
     };
     capaFondo.on('tileerror', alFallar);
     capa = L.layerGroup().addTo(mapa);
