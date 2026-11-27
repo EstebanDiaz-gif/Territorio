@@ -352,3 +352,60 @@ nav.tabs button[aria-current="page"] { color: var(--accent-ink); font-weight: 70
 .zona-label { background: none; border: 0; text-align: center; pointer-events: none; }
 .zona-label span { font-size: 13px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase; text-shadow: 0 0 3px #fff, 0 0 6px #fff; white-space: nowrap; }
 .con-mapa .toast { bottom: auto; top: calc(96px + env(safe-area-inset-top, 0px)); }
+
+/* ---------- Escritorio: menú al costado y contenido ancho ---------- */
+.nav-marca, .nav-pie { display: none; }
+@media (min-width: 1024px) {
+  #app.shell { max-width: none; display: grid; grid-template-columns: 252px minmax(0, 1fr); grid-template-rows: auto auto 1fr; align-items: start; min-height: 100vh; }
+  #app.shell > .demo-band { grid-column: 2; }
+  #app.shell > .top, #app.shell > main { grid-column: 2; }
+  #app.shell > nav.tabs {
+    grid-column: 1; grid-row: 1 / span 3; position: sticky; top: 0; left: auto; right: auto; bottom: auto;
+    height: 100vh; border-top: 0; border-right: 1px solid var(--line); padding: 0; display: flex; flex-direction: column;
+  }
+  #app.shell > nav.tabs .in { display: flex; flex-direction: column; gap: 4px; height: auto; max-width: none; margin: 0; padding: 8px 12px; flex: 1; overflow-y: auto; }
+  #app.shell > nav.tabs .in button { flex-direction: row; justify-content: flex-start; gap: 12px; font-size: 15px; padding: 11px 14px; border-radius: 12px; color: var(--ink); text-align: left; }
+  #app.shell > nav.tabs .in button:hover { background: var(--line-2); }
+  #app.shell > nav.tabs .in button[aria-current="page"] { background: var(--accent-soft); color: var(--accent-ink); }
+  #app.shell > nav.tabs .badge { position: static; margin-left: auto; }
+  .nav-marca { display: flex; align-items: center; gap: 12px; padding: 22px 22px 14px; }
+  .nav-marca svg rect[fill="#FFFFFF"] { fill: var(--ink); }
+  .nav-marca b { display: block; font: 800 19px/1.1 var(--f-display); }
+  .nav-marca span { display: block; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+  .nav-pie { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-top: 1px solid var(--line-2); }
+  .nav-instalar { display: flex; align-items: center; gap: 10px; justify-content: center; border: 1px dashed var(--accent); color: var(--accent-ink); background: transparent; border-radius: 12px; padding: 10px; font-weight: 600; font-size: 14px; }
+  .nav-instalar[hidden] { display: none; }
+  #app.shell > nav.tabs .nav-pie button { flex-direction: row; font-size: 14px; color: var(--ink); }
+  .nav-cuenta { display: flex; align-items: center; justify-content: flex-start; gap: 10px; border: 0; background: transparent; border-radius: 12px; padding: 8px; text-align: left; }
+  #app.shell > nav.tabs .nav-pie .nav-instalar { justify-content: center; color: var(--accent-ink); }
+  .nav-cuenta:hover { background: var(--line-2); }
+  .nav-cuenta .ini { width: 38px; height: 38px; border-radius: 19px; display: grid; place-items: center; font-size: 13px; font-weight: 700; flex: none; }
+  .nav-cuenta b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+  .nav-cuenta small { color: var(--muted); }
+  #app.shell .top .avatar, #app.shell .top .top-logo { display: none; }
+
+  #app.shell > .top { padding: 22px 36px 20px; position: sticky; top: 0; z-index: 10; }
+  #app.shell > .top > * { width: 100%; max-width: 1200px; margin-inline: auto; }
+  #app.shell > main { padding: 24px 36px 56px; }
+  #app.shell > main > * { width: 100%; max-width: 1200px; margin-inline: auto; }
+  #app.shell > main[data-tab="cargar"] > * { max-width: 720px; }
+
+  /* Gente: tarjetas en columnas */
+  #app.shell .lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px; align-items: start; }
+  #app.shell .lista > :not(.row) { grid-column: 1 / -1; }
+  #app.shell .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+  /* Panel: herramientas en dos columnas */
+  #app.shell main[data-tab="panel"] .herr-grid, #app.shell main[data-tab="panel"] .herramientas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+
+  /* Las hojas se abren como panel a la derecha */
+  .sheet-fondo { align-items: stretch; justify-content: flex-end; }
+  .sheet { max-width: 540px; max-height: none; height: 100vh; border-radius: 20px 0 0 20px; padding: 18px 24px 28px; animation: entraDer .18s ease-out; }
+  .sheet .asa { display: none; }
+  .toast { bottom: 28px; }
+
+  /* Mapa: la tarjeta queda a la izquierda, no a lo ancho */
+  .mapa-abajo { right: auto; width: 460px; }
+}
+@keyframes entraDer { from { transform: translateX(40px); opacity: .5; } }
+@media (min-width: 1024px) and (prefers-reduced-motion: reduce) { .sheet { animation: none; } }

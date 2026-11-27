@@ -289,6 +289,7 @@ async function salir() {
 // ---------------------------------------------------------------- login
 function pintarLogin() {
   const app = $('#app');
+  app.className = '';
   const demo = DEMO ? `
     <div class="card pad stack">
       <div><h2>Probá la app</h2><div class="muted">Modo demostración con datos inventados. Elegí con qué rol entrar:</div></div>
@@ -339,6 +340,28 @@ function isotipo(tam = 32, fondo = 'oscuro') {
 }
 const marca = () => `<div class="marca"><div class="logo">${isotipo(32)}</div><div><b>${esc(APP_NAME)}</b><div class="muted">Tu equipo y tu gente, el día de la elección</div></div></div>`;
 
+// ----- Instalar como app (en la compu: Chrome o Edge; en Android: Chrome)
+let pedidoInstalar = null;
+const yaInstalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+const puedeInstalar = () => !yaInstalada() && (!!pedidoInstalar || esIOS());
+const mostrarInstalar = () => document.querySelectorAll('[data-act=instalar]').forEach((b) => { b.hidden = !puedeInstalar(); });
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); pedidoInstalar = e; mostrarInstalar(); });
+window.addEventListener('appinstalled', () => { pedidoInstalar = null; mostrarInstalar(); toast('Listo: Territorio quedó instalada'); });
+async function instalarApp() {
+  if (pedidoInstalar) {
+    pedidoInstalar.prompt();
+    const r = await pedidoInstalar.userChoice.catch(() => null);
+    if (r?.outcome === 'accepted') pedidoInstalar = null;
+    mostrarInstalar();
+    return;
+  }
+  abrirHoja(`
+    <div class="row"><h2 class="grow">Instalar Territorio</h2><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    ${esIOS() ? `<ol class="stack" style="margin:0;padding-left:20px"><li>Abrí Territorio en <b>Safari</b>.</li><li>Tocá <b>Compartir</b> (el cuadrado con la flecha).</li><li>Elegí <b>Agregar a inicio</b>.</li></ol>`
+      : `<ol class="stack" style="margin:0;padding-left:20px"><li>Abrí Territorio en <b>Chrome</b> o <b>Edge</b>.</li><li>En la barra de direcciones, tocá el ícono de <b>Instalar</b> (una pantalla con una flecha), o en el menú ⋮ → <b>Instalar Territorio</b>.</li><li>Queda con su ícono en el escritorio y se abre en su propia ventana.</li></ol>`}`, { tipo: 'cuenta' });
+}
+
 // ---------------------------------------------------------------- estructura
 function tabsDisponibles() {
   const t = [['gente', 'Gente'], ['cargar', 'Cargar'], ['dia', 'Día E']];
@@ -350,11 +373,19 @@ function tabsDisponibles() {
 function pintar() {
   if (st.me.rol === 'fiscal') { pintarFiscal(); return; }
   const app = $('#app');
+  app.className = 'shell';
   app.innerHTML = `
     ${DEMO ? '<div class="demo-band">Modo demostración · los datos son inventados</div>' : ''}
     <header class="top" id="top"></header>
-    <main id="main"></main>
-    <nav class="tabs" aria-label="Secciones"><div class="in" id="nav"></div></nav>`;
+    <main id="main" data-tab="${st.tab}"></main>
+    <nav class="tabs" aria-label="Secciones">
+      <div class="nav-marca">${isotipo(30)}<div><b>${esc(APP_NAME)}</b><span>${esc(st.me.campania || '')}</span></div></div>
+      <div class="in" id="nav"></div>
+      <div class="nav-pie">
+        <button type="button" class="nav-instalar" data-act="instalar" ${puedeInstalar() ? '' : 'hidden'}>${ic('bajar', 18)} Instalar en esta compu</button>
+        <button type="button" class="nav-cuenta" data-act="cuenta"><span class="ini rol-${st.me.rol}">${esc(iniciales(st.me.nombre))}</span><span class="grow"><b>${esc(st.me.nombre)}</b><small>${ROL_LABEL[st.me.rol]}</small></span></button>
+      </div>
+    </nav>`;
   pintarNav();
   pintarTop();
   if (liviano()) { const viejo = Date.now() - 10000; for (const k in conteos) if (conteos[k].t < viejo) conteos[k].t = 0; }
@@ -1488,7 +1519,7 @@ function vistaPanel() {
     <div id="conflictos"></div>
     <div id="disputas"></div>
     <div class="sec-title"><h2>Herramientas</h2></div>
-    <div class="stack" style="gap:8px">
+    <div class="stack herramientas" style="gap:8px">
       ${herr('gente', 'gente', 'Cargar lista de gente', 'Excel, CSV o Word de tu equipo', `
         <div class="muted">Detecta las columnas solo, limpia los DNI y completa escuela y mesa con el padrón. Los DNI que ya son de otro no se importan.</div>
         ${subir('imp', 'Elegir archivo')}`)}
@@ -1849,6 +1880,7 @@ const hora = (t) => { const d = new Date(ms(t)); return d.toLocaleTimeString('es
 const fx = (cambios) => S.actualizarFiscalia(st.me.uid, { ...cambios, path: st.me.path, fiscalUid: st.me.uid, nombre: st.me.nombre, dni: st.me.dni });
 
 function pintarFiscal() {
+  $('#app').className = '';
   const me = st.me;
   if (!st.fx.inicio) {
     st.fx.inicio = true;
@@ -2209,6 +2241,7 @@ function hojaCuenta() {
       <div class="grow"><h2>${esc(me.nombre)}</h2><div class="muted">${ROL_LABEL[me.rol]}${me.circuito ? ' · ' + esc(textoCircuitos(me)) : ''}</div></div>
       <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
     <div class="card pad small stack"><div>Campaña: <b>${esc(me.campania)}</b></div><div class="num">DNI: <b>${fmtDni(me.dni)}</b></div></div>
+    ${puedeInstalar() ? `<button class="btn btn-sec btn-full" data-act="instalar">${ic('bajar', 18)} Instalar en este ${matchMedia('(min-width: 1024px)').matches ? 'equipo' : 'celular'}</button>` : ''}
     <button class="btn btn-sec btn-full" data-act="mi-clave">${ic('llave', 18)} Cambiar mi contraseña</button>
     <button class="btn btn-sec btn-full" data-act="salir">${DEMO ? 'Cambiar de rol' : 'Cerrar sesión'}</button>
     ${DEMO ? '<button class="btn btn-ghost" data-act="demo-reset">Volver los datos de prueba al inicio</button>' : ''}`, { tipo: 'cuenta' });
@@ -2285,6 +2318,7 @@ const acciones = {
   'ir-entrar': () => { st.login = 'entrar'; pintarLogin(); },
   tab: (el) => { cerrarHoja(); navegar(el.dataset.tab); pintar(); if (st.tab === 'cargar') $('#c-dni')?.focus(); },
   cuenta: hojaCuenta,
+  instalar: () => instalarApp(),
   'mi-clave': hojaMiClave,
   blanquear: (el) => hojaBlanquear(el.dataset.uid),
   'blanquear-si': blanquear,
