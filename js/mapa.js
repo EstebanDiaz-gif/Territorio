@@ -229,6 +229,7 @@ export async function abrirMapa(api) {
       card.innerHTML = `
         <div class="mapa-chips">${gs.map((g, i) => `<button type="button" class="mapa-chip" data-m="entrar" data-i="${i}" ${puedeEntrar(g) ? '' : 'disabled'}><i style="background:${g.color}"></i>${esc(g.propio ? (gs.length > 1 ? 'Directas' : primer(g.u.nombre)) : primer(g.u.nombre))} <b>${g.ps.length}</b></button>`).join('')}</div>
         ${fueraTot ? `<div class="small" style="margin-top:8px">Pines con <b style="color:#DC2626">borde rojo</b>: ${fueraTot} lejos de su zona.</div>` : ''}
+        ${!gs.some((g) => g.pts.length) && ps.length ? `<div class="small" style="margin-top:10px"><b>Todavía no hay nadie ubicado en el mapa.</b> Cada persona aparece cuando su domicilio se ubica (botón <b>Ubicarlas</b>) o cuando alguien toca <b>“Estoy en su casa”</b> en su ficha.${sinDom ? ` ${sinDom} no ${sinDom === 1 ? 'tiene' : 'tienen'} domicilio cargado.` : ''}${noSe ? ` ${noSe} con una dirección que el mapa no encontró.` : ''}</div>` : ''}
         ${ubicar ? `<div style="margin-top:10px">${ubicar}</div>` : ''}`;
       return;
     }

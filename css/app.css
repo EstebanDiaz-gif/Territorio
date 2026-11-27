@@ -683,3 +683,14 @@ nav.tabs button[aria-current="page"]::before { content: ''; position: absolute; 
   :root:not([data-theme="light"]) .mapa-full .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
   :root:not([data-theme="light"]) .mapa-full .leaflet-container, :root:not([data-theme="light"]) .mapa-lienzo { background: #0B1220; }
 }
+/* Tarjeta y lista del mapa en modo oscuro */
+:root[data-theme="dark"] .mapa-card, :root[data-theme="dark"] .mapa-chip { background: #172238; color: #F1F5F9; border-color: #293750; }
+:root[data-theme="dark"] .mapa-card .muted, :root[data-theme="dark"] .mapa-chip b { color: #94A3B8; }
+:root[data-theme="dark"] .mapa-ib.chico { background: #1F2B43; color: #F1F5F9; }
+:root[data-theme="dark"] .mapa-fab:not(.azul) { background: #172238; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mapa-card, :root:not([data-theme="light"]) .mapa-chip { background: #172238; color: #F1F5F9; border-color: #293750; }
+  :root:not([data-theme="light"]) .mapa-card .muted, :root:not([data-theme="light"]) .mapa-chip b { color: #94A3B8; }
+  :root:not([data-theme="light"]) .mapa-ib.chico { background: #1F2B43; color: #F1F5F9; }
+  :root:not([data-theme="light"]) .mapa-fab:not(.azul) { background: #172238; }
+}
