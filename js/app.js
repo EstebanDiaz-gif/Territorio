@@ -3,7 +3,7 @@ import {
   ROLES, ROL_LABEL, ROL_CORTO, nivel, rolAbajo, ESTADOS, ESTADO_LABEL, TIPOS, TIPO_LABEL,
   normDni, dniValido, fmtDni, telWhatsApp, idLista, palabrasDe, circuitosDe, unCircuito, textoCircuitos, normCirc
 } from './roles.js';
-import { abrirMapa } from './mapa.js';
+import { abrirMapa, ubicar } from './mapa.js';
 import { leerArchivo, mapearPersonas, mapearPadron, exportarExcel, exportarGestiones, NOMBRE_COLUMNA } from './importers.js';
 
 const S0 = FIREBASE_CONFIG ? await import('./store-firebase.js') : await import('./store-demo.js');
@@ -835,6 +835,7 @@ async function guardarCarga() {
     if (r.yaEnDisputa) { Object.assign(st.c, { fase: 'endisputa', persona: r.persona }); pintarCargar(); return; }
     if (r.ocupada) { Object.assign(st.c, { fase: 'disputable', padron: c.padron }); pintarCargar(); return; }
     toast(r.pendiente ? `${primerNombre(nombre)} quedó guardada. Se sincroniza cuando haya señal.` : `${primerNombre(nombre)} quedó en ${dueno.uid === st.me.uid ? 'tu lista' : 'la lista de ' + dueno.nombre}`);
+    ubicarEnSegundoPlano(c.dni, datos.domicilio);
     st.c = { fase: 'inicio' };
     $('#c-dni').value = '';
     pintarCargar();
@@ -843,6 +844,12 @@ async function guardarCarga() {
     err.textContent = mensajeError(e);
     btn.disabled = false;
   }
+}
+
+// Ubica a la persona en el mapa con su domicilio, sin frenar la carga (si no hay señal o no la encuentra, no pasa nada)
+function ubicarEnSegundoPlano(dni, dom) {
+  if (!dom || dom.trim().length < 4 || DEMO) return;
+  ubicar(dom).then((g) => S.actualizarPersona(dni, { geo: g || { no: true } })).catch(() => {});
 }
 
 // ---------------------------------------------------------------- DÍA E
@@ -2842,7 +2849,7 @@ document.addEventListener('change', async (e) => {
   if (sheetCtx?.tipo === 'persona') {
     const dni = sheetCtx.dni;
     if (id === 'p-tel') { await actualizarPersonaApp(dni, { tel: normDni(e.target.value) }); toast('Teléfono guardado'); }
-    if (id === 'p-dom') { const p0 = personaLocal(dni); await actualizarPersonaApp(dni, { domicilio: e.target.value.trim().slice(0, 120), ...(p0?.geo && p0.geo.src !== 'gps' ? { geo: null } : {}) }); toast('Domicilio guardado'); hojaPersona(dni); }
+    if (id === 'p-dom') { const p0 = personaLocal(dni); const dom = e.target.value.trim().slice(0, 120); await actualizarPersonaApp(dni, { domicilio: dom, ...(p0?.geo && p0.geo.src !== 'gps' ? { geo: null } : {}) }); toast('Domicilio guardado'); hojaPersona(dni); if (p0?.geo?.src !== 'gps') ubicarEnSegundoPlano(dni, dom); }
     if (id === 'p-nota') { await actualizarPersonaApp(dni, { nota: e.target.value.trim(), revisar: false }); toast('Nota guardada'); }
     if (id === 'p-tipo') { await actualizarPersonaApp(dni, { tipo: e.target.value }); }
   }

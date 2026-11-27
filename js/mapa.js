@@ -45,16 +45,33 @@ function zona(pts) {
 const CACHE = 'territorio-geo-v1';
 let cacheGeo = {}; try { cacheGeo = JSON.parse(localStorage.getItem(CACHE) || '{}'); } catch { /* */ }
 const guardarCache = () => { try { localStorage.setItem(CACHE, JSON.stringify(cacheGeo)); } catch { /* */ } };
-const limpiarDom = (d) => String(d || '').replace(/\b(B[°º]?|Bº|Barrio)\s*/gi, 'Barrio ').replace(/\bPJE\.?\b/gi, 'Pasaje').replace(/\bAV\.?\b/gi, 'Avenida').replace(/\s+/g, ' ').trim();
-async function ubicar(dom) {
+const limpiarDom = (d) => String(d || '').replace(/\b(B[°º]?|Bº|Barrio)\s*/gi, 'Barrio ').replace(/\bPJE\b\.?/gi, 'Pasaje').replace(/\bAV\b\.?/gi, 'Avenida').replace(/\s+/g, ' ').trim();
+// El servicio gratis acepta un pedido por segundo: todos los pedidos de la app pasan por esta fila
+let filaGeo = Promise.resolve(); let ultimoPedido = 0;
+function pedirGeo(q) {
+  const t = filaGeo.then(async () => {
+    const espera = ultimoPedido + 1100 - Date.now(); if (espera > 0) await new Promise((r) => setTimeout(r, espera));
+    ultimoPedido = Date.now();
+    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ar&viewbox=-66.3,-26.0,-64.4,-28.1&bounded=1&q=' + encodeURIComponent(q + ', Tucumán, Argentina');
+    const r = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+    if (!r.ok) throw new Error('El servicio de mapas no respondió (' + r.status + ')');
+    const j = await r.json();
+    return j[0] ? { lat: +(+j[0].lat).toFixed(6), lng: +(+j[0].lon).toFixed(6) } : null;
+  });
+  filaGeo = t.catch(() => {});
+  return t;
+}
+// Busca el domicilio; si no encuentra la altura exacta, ubica la calle (src: 'calle', aproximado)
+export async function ubicar(dom) {
   const q = limpiarDom(dom);
   if (q.length < 4) return null;
   if (q in cacheGeo) return cacheGeo[q];
-  const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ar&viewbox=-66.3,-26.0,-64.4,-28.1&bounded=1&q=' + encodeURIComponent(q + ', Tucumán, Argentina');
-  const r = await fetch(url, { headers: { 'Accept-Language': 'es' } });
-  if (!r.ok) throw new Error('El servicio de mapas no respondió (' + r.status + ')');
-  const j = await r.json();
-  const g = j[0] ? { lat: +(+j[0].lat).toFixed(6), lng: +(+j[0].lon).toFixed(6), src: 'dir' } : null;
+  let g = await pedirGeo(q);
+  if (g) g.src = 'dir';
+  else {
+    const calle = q.replace(/\b(n[°º.]?|nro\.?|n[uú]mero)\s*/gi, '').replace(/\b\d+\b/g, '').replace(/\s+/g, ' ').trim();
+    if (calle.length >= 4 && calle !== q) { g = await pedirGeo(calle); if (g) g.src = 'calle'; }
+  }
   cacheGeo[q] = g; guardarCache();
   return g;
 }
@@ -148,6 +165,8 @@ export async function abrirMapa(api) {
       g.votaron = g.ps.filter((p) => p.voto).length;
     }
     ultimo = { id, ps, gs };
+    // si hay gente con domicilio que todavía no está en el mapa, se ubica sola (sin tocar nada)
+    if (!api.me.soloLectura && !ubicando && ps.some((p) => !conGeo(p) && !(p.geo && p.geo.no) && (p.domicilio || '').trim().length >= 4)) setTimeout(() => { if (!ubicando && !cancelar) ubicarTodas(); }, 400);
     const vot = ps.filter((p) => p.voto).length;
     fondo.querySelector('#m-resumen').textContent = `${ps.length} ${ps.length === 1 ? 'persona' : 'personas'}${gs.length > 1 || !gs[0]?.propio ? ` en ${gs.filter((g) => !g.propio).length} zonas` : ''}${vot ? ` · ${vot} ya votaron` : ''}`;
     dibujar(true);
@@ -253,7 +272,6 @@ export async function abrirMapa(api) {
     let ok = 0; let no = 0;
     for (let i = 0; i < max && !cancelar; i++) {
       const p = lista[i];
-      const enCache = limpiarDom(p.domicilio) in cacheGeo;
       try {
         const g = await ubicar(p.domicilio);
         const geo = g || { no: true };
@@ -261,7 +279,6 @@ export async function abrirMapa(api) {
         p.geo = geo; if (g) ok++; else no++;
       } catch (e) { const x = prog(); if (x) x.textContent = e.message; break; }
       const x = prog(); if (x) x.textContent = `Ubicando ${i + 1} de ${max}… (${ok} en el mapa${no ? `, ${no} no encontradas` : ''})`;
-      if (!enCache) await new Promise((r) => setTimeout(r, 1100));
     }
     ubicando = false;
     if (!cancelar) { cachePorNodo.clear(); await pintar(); api.toast(`Listo: ${ok} ${ok === 1 ? 'dirección ubicada' : 'direcciones ubicadas'}${no ? ` · ${no} no se encontraron` : ''}`); }
