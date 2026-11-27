@@ -214,12 +214,21 @@ export async function importarPadron(registros, onProgreso) {
   const grupos = {};
   for (const r of registros) (grupos[bucketDe(r.dni)] ||= {})[r.dni] = padronAString(r);
   const claves = Object.keys(grupos);
-  let hechos = 0;
-  for (let i = 0; i < claves.length; i += 200) {
+  // Firestore rechaza envíos de más de ~10 MB ("Transaction too big"): se manda en tandas de ~2 MB
+  const MAX_BYTES = 2_000_000; const MAX_DOCS = 100;
+  let hechos = 0; let i = 0;
+  while (i < claves.length) {
     const b = writeBatch(db);
-    for (const k of claves.slice(i, i + 200)) b.set(D('padron', k), { v: grupos[k] }, { merge: true });
+    let bytes = 0; let docs = 0; let personas = 0;
+    while (i < claves.length && docs < MAX_DOCS) {
+      const k = claves[i];
+      const tam = JSON.stringify(grupos[k]).length * 2;
+      if (docs > 0 && bytes + tam > MAX_BYTES) break;
+      b.set(D('padron', k), { v: grupos[k] }, { merge: true });
+      bytes += tam; docs++; personas += Object.keys(grupos[k]).length; i++;
+    }
     await b.commit();
-    hechos += claves.slice(i, i + 200).reduce((a, k) => a + Object.keys(grupos[k]).length, 0);
+    hechos += personas;
     onProgreso?.(hechos, registros.length);
   }
   await setDoc(D('padron', 'resumen'), { circuitos: resumirPadron(registros) }, { merge: true });
