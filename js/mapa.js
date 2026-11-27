@@ -295,8 +295,20 @@ export async function abrirMapa(api) {
     const L = await leaflet();
     const el = fondo.querySelector('#m-mapa'); el.innerHTML = '';
     mapa = L.map(el, { zoomControl: false, attributionControl: true }).setView(CENTRO, 13);
-    // Mapa base claro (CARTO Voyager, datos de OpenStreetMap): calles y barrios con nombre, deja resaltar pines y zonas
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd', attribution: '© OpenStreetMap · © CARTO' }).addTo(mapa);
+    // Mapa base: OpenStreetMap (gratis, sin clave). Si no responde, se pasa solo a Esri.
+    // Los colores se suavizan con CSS (.mapa-full .leaflet-tile) para que resalten los pines y las zonas.
+    const FONDOS = [
+      ['https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }],
+      ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: '© Esri · OpenStreetMap' }]
+    ];
+    let fondo = 0; let fallas = 0;
+    let capaFondo = L.tileLayer(...FONDOS[0]).addTo(mapa);
+    const alFallar = () => {
+      if (++fallas < 6 || fondo >= FONDOS.length - 1) return;
+      fondo++; fallas = 0; mapa.removeLayer(capaFondo);
+      capaFondo = L.tileLayer(...FONDOS[fondo]).addTo(mapa); capaFondo.on('tileerror', alFallar);
+    };
+    capaFondo.on('tileerror', alFallar);
     capa = L.layerGroup().addTo(mapa);
     capaYo = L.layerGroup().addTo(mapa);
     mapa.on('click', () => { if (elegido) { elegido = null; dibujar(); } });
