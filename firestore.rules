@@ -165,7 +165,9 @@ service cloud.firestore {
       // ---------- Registro de gestiones (módulo por campaña) ----------
       // Cada gestión cuelga del dirigente "a través de" quien se hizo (su path): la ve él, sus superiores y la cabeza.
       match /gestiones/{gid} {
-        allow read: if gestor() && (esCabeza() || enMiEquipo(resource.data.path));
+        // también la ven quienes la tuvieron en sus manos (y sus superiores): pathsRecorrido
+        function enRecorrido() { return request.auth.uid in resource.data.get('pathsRecorrido', []); }
+        allow read: if gestor() && (esCabeza() || enMiEquipo(resource.data.path) || enRecorrido());
         allow create: if gestor()
           && get(ruta('')).data.modulos.gestiones == true
           && request.resource.data.cargadoPor == request.auth.uid
@@ -176,6 +178,12 @@ service cloud.firestore {
           && request.resource.data.cargadoPor == resource.data.cargadoPor
           && request.resource.data.path == usuario(request.resource.data.porId).path
           && (esCabeza() || enMiEquipo(request.resource.data.path));
+        // Recorrido: pasarla a otro, confirmar que la recibió, marcar que llegó al vecino. Los pasos solo se agregan.
+        allow update: if gestor()
+          && (esCabeza() || enMiEquipo(resource.data.path) || enRecorrido())
+          && soloCambia(['recorrido', 'pathsRecorrido', 'tieneId', 'tieneNombre', 'estado', 'fechaEntrega', 'actualizadoAt'])
+          && request.resource.data.recorrido.size() >= resource.data.get('recorrido', []).size()
+          && request.resource.data.get('pathsRecorrido', []).hasAll(resource.data.get('pathsRecorrido', []));
         allow delete: if gestor() && (esCabeza() || enMiEquipo(resource.data.path));
       }
 

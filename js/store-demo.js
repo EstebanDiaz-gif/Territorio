@@ -406,18 +406,52 @@ export async function subirVideoConLink(c, t, dni, archivo, onProgreso) {
   guardar();
 }
 export async function guardarVideoObligatorio(v) { db.campania.videoVoto = !!v; if (me) me.videoVoto = !!v; guardar(); }
-const gestionVisible = (g) => me.rol === 'cabeza' || (g.path || []).includes(me.uid);
+const gestionVisible = (g) => me.rol === 'cabeza' || (g.path || []).includes(me.uid) || (g.pathsRecorrido || []).includes(me.uid);
 export function watchGestiones(filtro, cb) {
   const f = () => cb(Object.values(db.gestiones || {}).filter((g) => g[filtro.campo] === filtro.valor && gestionVisible(g)));
   subs.add(f); f();
   return () => subs.delete(f);
 }
 export async function gestionesDePersona(dni) { return Object.values(db.gestiones || {}).filter((g) => g.dni === dni && gestionVisible(g)); }
+const quien = (u) => ({ uid: u.uid, nombre: u.nombre });
 export async function guardarGestion(g) {
   await espera();
   const id = g.id || 'g' + Date.now().toString(36);
-  db.gestiones[id] = g.id ? { ...db.gestiones[id], ...g } : { ...g, id, cargadoPor: me.uid, cargadoNombre: me.nombre, at: Date.now() };
-  guardar(); return id;
+  const { tiene, ...datos } = g;
+  if (g.id) { delete datos.estado; db.gestiones[id] = { ...db.gestiones[id], ...datos }; guardar(); return id; }
+  const x = { ...datos, id, cargadoPor: me.uid, cargadoNombre: me.nombre, at: Date.now() };
+  if (datos.estado === 'en_camino' && tiene) {
+    Object.assign(x, { tieneId: tiene.uid, tieneNombre: tiene.nombre, pathsRecorrido: tiene.path,
+      recorrido: [{ tipo: 'origen', at: Date.now(), fecha: datos.fecha, por: quien(me), origen: datos.origen || '', a: quien(tiene), recibido: tiene.uid === me.uid }] });
+  } else {
+    Object.assign(x, { estado: 'entregada', fechaEntrega: datos.fecha, recorrido: [
+      ...(datos.origen ? [{ tipo: 'origen', at: Date.now(), fecha: datos.fecha, por: quien(me), origen: datos.origen, a: quien(me), recibido: true }] : []),
+      { tipo: 'entrega', at: Date.now(), fecha: datos.fecha, por: quien(me), recibio: '' }] });
+  }
+  db.gestiones[id] = x; guardar(); return id;
+}
+export function watchGestionesEnMano(cb) {
+  const f = () => cb(Object.values(db.gestiones || {}).filter((g) => g.tieneId === me.uid && g.estado === 'en_camino'));
+  subs.add(f); f();
+  return () => subs.delete(f);
+}
+const miRecibo = (x) => { const r = x.recorrido || []; const p = r[r.length - 1]; if (p && p.tipo !== 'entrega' && p.a?.uid === me.uid && !p.recibido) Object.assign(p, { recibido: true, recibidoAt: Date.now() }); };
+export async function pasarGestion(g, u, nota = '') {
+  await espera(); const x = db.gestiones[g.id]; miRecibo(x);
+  x.recorrido = [...(x.recorrido || []), { tipo: 'pase', at: Date.now(), de: quien(me), a: quien(u), nota: String(nota).slice(0, 200), recibido: u.uid === me.uid }];
+  Object.assign(x, { tieneId: u.uid, tieneNombre: u.nombre, pathsRecorrido: [...new Set([...(x.pathsRecorrido || []), ...u.path])] });
+  guardar();
+}
+export async function confirmarRecibido(g) {
+  await espera(); const x = db.gestiones[g.id]; const r = x.recorrido || []; const p = r[r.length - 1];
+  if (p && p.tipo !== 'entrega' && p.a?.uid === me.uid) Object.assign(p, { recibido: true, recibidoAt: Date.now() });
+  guardar();
+}
+export async function entregarGestion(g, { fecha, recibio = '', nota = '' }) {
+  await espera(); const x = db.gestiones[g.id]; miRecibo(x);
+  x.recorrido = [...(x.recorrido || []), { tipo: 'entrega', at: Date.now(), fecha, por: quien(me), recibio: String(recibio).slice(0, 120), nota: String(nota).slice(0, 200) }];
+  Object.assign(x, { estado: 'entregada', fechaEntrega: fecha }); delete x.tieneId; delete x.tieneNombre;
+  guardar();
 }
 export async function borrarGestion(id) { delete db.gestiones[id]; guardar(); }
 export async function guardarTiposGestion(tipos, espacios) { Object.assign(db.campania, { tiposGestion: tipos, espacios }); if (me) Object.assign(me, { tiposGestion: tipos, espacios }); guardar(); }

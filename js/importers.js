@@ -220,7 +220,11 @@ export async function exportarGestiones(gestiones, nombreArchivo) {
   const XLSX = await necesito('XLSX');
   const filas = [...gestiones].sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))).map((g) => ({
     Fecha: g.fecha, DNI: g.dni, Nombre: g.nombre, Domicilio: g.domicilio, Circuito: g.circuito, Escuela: g.escuela, Mesa: g.mesa,
-    Gestión: g.tipo, Detalle: g.detalle, Cantidad: g.cantidad, Monto: g.monto || 0, 'Espacio (dirigente)': g.porNombre, 'Cargado por': g.cargadoNombre
+    Gestión: g.tipo, Detalle: g.detalle, Cantidad: g.cantidad, Monto: g.monto || 0, 'Espacio (dirigente)': g.porNombre, 'Cargado por': g.cargadoNombre,
+    Origen: g.origen || '', Estado: g.estado === 'en_camino' ? 'En camino' : 'Entregada', 'Lo tiene': g.tieneNombre || '', 'Fecha de entrega': g.fechaEntrega || (g.estado === 'en_camino' ? '' : g.fecha),
+    Recorrido: (g.recorrido || []).map((p) => (p.tipo === 'origen' ? `Se consiguió${p.origen ? ' (' + p.origen + ')' : ''} → ${p.a?.nombre || ''}`
+      : p.tipo === 'pase' ? `${p.de?.nombre || ''} → ${p.a?.nombre || ''}${p.recibido ? '' : ' (sin confirmar)'}`
+        : `Entregada al vecino por ${p.por?.nombre || ''}${p.recibio ? ' (recibió ' + p.recibio + ')' : ''}`)).join(' | ')
   }));
   const ws = XLSX.utils.json_to_sheet(filas);
   const wb = XLSX.utils.book_new();

@@ -884,9 +884,10 @@ const hoyISOg = () => { const d = new Date(); return `${d.getFullYear()}-${Strin
 const fmtFecha = (f) => (f ? f.split('-').reverse().join('/') : '');
 const fmtPlata = (n) => '$ ' + Math.round(Number(n) || 0).toLocaleString('es-AR');
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-st.gest = { lista: [], cargando: false, periodo: hoyISOg().slice(0, 7), q: '', tipo: '', por: '', clave: '', unsub: null };
+st.gest = { lista: [], cargando: false, periodo: hoyISOg().slice(0, 7), q: '', tipo: '', por: '', estado: '', clave: '', unsub: null, enMano: [], unsubMano: null };
 function suscribirGestiones() {
-  if (st.tab !== 'gestiones' || !moduloGestiones()) { st.gest.unsub?.(); st.gest.unsub = null; st.gest.clave = ''; return; }
+  if (st.tab !== 'gestiones' || !moduloGestiones()) { st.gest.unsub?.(); st.gest.unsub = null; st.gest.clave = ''; st.gest.unsubMano?.(); st.gest.unsubMano = null; return; }
+  st.gest.unsubMano ||= S.watchGestionesEnMano((x) => { st.gest.enMano = x; if (st.tab === 'gestiones') pintarGestiones(); });
   const p = st.gest.periodo; const filtro = p.length === 4 ? { campo: 'anio', valor: p } : { campo: 'mes', valor: p };
   const clave = filtro.campo + filtro.valor;
   if (clave === st.gest.clave && st.gest.unsub) return;
@@ -910,17 +911,38 @@ function vistaGestiones() {
       ${esMov() ? '' : `<select id="g-por" class="input" aria-label="Espacio"><option value="">Espacio: todos</option>${[st.me, ...miEquipo()].map((u) => `<option value="${u.uid}" ${g.por === u.uid ? 'selected' : ''}>${esc(u.nombre)} · ${ROL_CORTO[u.rol]}</option>`).join('')}</select>`}
     </div>
     <label class="search">${ic('buscar', 18)}<input id="g-q" type="search" placeholder="Buscar por nombre o DNI" value="${esc(g.q)}" aria-label="Buscar gestión"></label>
+    <div class="chips" role="group" aria-label="Estado de la gestión">${[['', 'Todas'], ['en_camino', 'En camino'], ['entregada', 'Entregadas']].map(([k, l]) => `<button type="button" class="chip" data-act="g-estado" data-v="${k}" aria-pressed="${g.estado === k}">${l}</button>`).join('')}</div>
+    <div id="g-mano"></div>
     <div id="g-resumen"></div>
     <div id="g-lista" class="stack"></div>`;
 }
 function gestionesFiltradas() {
   const g = st.gest; const q = g.q.trim().toLowerCase(); const qd = normDni(g.q);
-  return g.lista.filter((x) => (!g.tipo || x.tipo === g.tipo) && (!g.por || (x.path || []).includes(g.por))
+  return g.lista.filter((x) => (!g.tipo || x.tipo === g.tipo) && (!g.por || (x.path || []).includes(g.por)) && (!g.estado || estadoGestion(x) === g.estado)
     && (!q || String(x.nombre).toLowerCase().includes(q) || (qd.length >= 3 && String(x.dni).includes(qd)) || String(x.porNombre || '').toLowerCase().includes(q)))
     .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)) || (b.at || 0) - (a.at || 0));
 }
+// Estado de una gestión: "en_camino" (todavía no llegó al vecino) o "entregada". Las viejas, sin recorrido, cuentan como entregadas.
+const estadoGestion = (x) => (x.estado === 'en_camino' ? 'en_camino' : 'entregada');
+const ultimoPaso = (x) => (x.recorrido || [])[(x.recorrido || []).length - 1];
+const sinConfirmar = (x) => { const p = ultimoPaso(x); return estadoGestion(x) === 'en_camino' && p && p.tipo !== 'entrega' && !p.recibido; };
+const diasDesde = (ms_) => Math.floor((Date.now() - ms_) / 86400000);
+function pillEstadoGestion(x) {
+  if (estadoGestion(x) === 'entregada') return `<span class="pill p-ok">Entregada${x.fechaEntrega && x.fechaEntrega !== x.fecha ? ' el ' + fmtFecha(x.fechaEntrega) : ''}</span>`;
+  const p = ultimoPaso(x); const d = p ? diasDesde(p.at) : 0;
+  return `<span class="pill p-warn">En camino · lo tiene ${esc(primerNombre(x.tieneNombre || ''))}${d >= 1 ? ` hace ${d} ${d === 1 ? 'día' : 'días'}` : ''}</span>${sinConfirmar(x) ? ' <span class="pill p-neutral">Sin confirmar</span>' : ''}`;
+}
 function pintarGestiones() {
   const el = $('#g-lista'); const rs = $('#g-resumen'); if (!el) return;
+  const mano = $('#g-mano');
+  if (mano) {
+    const xs = st.gest.enMano;
+    mano.innerHTML = xs.length ? `<div class="card">
+      <div class="escuela-h"><span style="color:var(--warn)">${ic('gestiones', 22)}</span><div class="grow"><h3>Tenés ${xs.length} ${xs.length === 1 ? 'gestión' : 'gestiones'} para entregar</h3><div class="muted small">Cuando llegue al vecino, marcala como entregada. Si se la pasás a otro, registralo.</div></div></div>
+      ${xs.map((x) => `<button type="button" class="votante" data-act="g-ver" data-id="${esc(x.id)}" style="width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line-2)">
+        <div class="grow"><b>${esc(x.tipo)}</b>${x.cantidad > 1 ? ' ×' + x.cantidad : ''} para <b>${esc(x.nombre || '')}</b><div class="muted small">${esc(x.domicilio || '')}${sinConfirmar(x) ? ' · <b style="color:var(--warn)">confirmá que la recibiste</b>' : ''}</div></div><span class="chev">›</span></button>`).join('')}
+    </div>` : '';
+  }
   if (st.gest.cargando && !st.gest.lista.length) { el.innerHTML = '<div class="vacio">Cargando…</div>'; rs.innerHTML = ''; return; }
   const lista = gestionesFiltradas();
   const monto = lista.reduce((a, x) => a + (Number(x.monto) || 0), 0);
@@ -928,9 +950,11 @@ function pintarGestiones() {
   const agrupar = (f) => { const m = {}; for (const x of lista) { const k = f(x) || '–'; m[k] ||= { n: 0, $: 0 }; m[k].n++; m[k].$ += Number(x.monto) || 0; } return Object.entries(m).sort((a, b) => b[1].n - a[1].n); };
   const tabla = (titulo, filas, clave) => filas.length ? `<details class="herr" data-recordar="g-${clave}" ${st.abiertosUI?.['g-' + clave] ? 'open' : ''}><summary><span class="grow"><b>${titulo}</b></span><span class="chev" aria-hidden="true">▸</span></summary>
     <div class="herr-body">${filas.map(([k, v]) => `<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span>${esc(k)}</span><span class="num small"><b>${v.n}</b>${v.$ ? ' · ' + fmtPlata(v.$) : ''}</span></div>`).join('')}</div></details>` : '';
+  const enCamino = lista.filter((x) => estadoGestion(x) === 'en_camino').length;
   rs.innerHTML = lista.length ? `<div class="tiles">
       <div class="tile t-acc"><b>${lista.length}</b><span>gestiones</span></div>
       <div class="tile t-ok"><b>${personas}</b><span>personas</span></div>
+      <div class="tile ${enCamino ? 't-warn' : 't-neutral'}"><b>${enCamino}</b><span>en camino (todavía no llegaron)</span></div>
       <div class="tile t-neutral"><b style="font-size:22px">${fmtPlata(monto)}</b><span>monto total</span></div>
     </div>
     <div class="stack" style="gap:8px">
@@ -943,6 +967,7 @@ function pintarGestiones() {
       <div class="row" style="justify-content:space-between"><b>${esc(x.nombre || 'Sin nombre')}</b><span class="muted small num">${fmtFecha(x.fecha)}</span></div>
       <div><span class="pill p-ok">${esc(x.tipo)}</span>${x.cantidad > 1 ? ` <b>×${x.cantidad}</b>` : ''} ${esc(x.detalle || '')}${x.monto ? ` · <b class="num">${fmtPlata(x.monto)}</b>` : ''}</div>
       <div class="muted small">Espacio de ${esc(x.porNombre || '')}${x.circuito ? ` · Circ. ${esc(x.circuito)}${x.mesa ? ' · Mesa ' + esc(x.mesa) : ''}` : ''}</div>
+      ${x.recorrido ? `<div class="tags">${pillEstadoGestion(x)}</div>` : ''}
     </button>`).join('') : `<div class="vacio">${st.gest.lista.length ? 'No hay gestiones con ese filtro.' : 'Todavía no hay gestiones registradas en este período.'}</div>`;
 }
 
@@ -957,7 +982,12 @@ function hojaGestion(g = null, dniInicial = '') {
   abrirHoja(`
     <div class="row"><h2 class="grow">${g ? 'Editar gestión' : 'Registrar gestión'}</h2><button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
     <form id="f-gestion" class="stack" autocomplete="off">
-      <div><label class="label" for="g-fecha">Fecha de entrega</label><input id="g-fecha" type="date" class="input" value="${esc(x.fecha)}" required></div>
+      ${g ? '' : `<div><div class="label">¿Ya llegó al vecino?</div>
+        <div class="chips" role="group" aria-label="Estado"><button type="button" class="chip" data-act="g-f-estado" data-v="entregada" aria-pressed="true">Sí, ya se entregó</button><button type="button" class="chip" data-act="g-f-estado" data-v="en_camino" aria-pressed="false">Todavía no</button></div></div>
+      <div id="g-tiene-box" hidden><label class="label" for="g-tiene">¿Quién la tiene ahora?</label><select id="g-tiene" class="input">${[st.me, ...miEquipo()].filter((u) => u.rol !== 'fiscal').map((u) => `<option value="${u.uid}">${esc(u.nombre)} · ${ROL_CORTO[u.rol]}${u.uid === st.me.uid ? ' (yo)' : ''}</option>`).join('')}</select>
+        <div class="muted small">Después se puede ir pasando de mano en mano hasta que llegue al vecino, y queda registrado cada paso.</div></div>`}
+      <div><label class="label" for="g-fecha" id="g-fecha-l">${g && estadoGestion(g) === 'en_camino' ? 'Fecha en que se consiguió' : 'Fecha de entrega'}</label><input id="g-fecha" type="date" class="input" value="${esc(x.fecha)}" required></div>
+      <div><label class="label" for="g-origen">De dónde salió <span class="muted">(opcional)</span></label><input id="g-origen" class="input" value="${esc(x.origen || '')}" placeholder="Ej: Municipalidad, Desarrollo Social, donación"></div>
       <div><label class="label" for="g-dni">A quién · DNI</label><input id="g-dni" class="input" inputmode="numeric" value="${esc(x.dni || '')}" placeholder="Sin puntos"></div>
       <div id="g-persona" class="muted small">${datos.nombre ? `${esc(datos.nombre)}${datos.circuito ? ` · Circ. ${esc(datos.circuito)}` : ''}${datos.mesa ? ` · Mesa ${esc(datos.mesa)}` : ''}` : 'Escribí el DNI: si está en el padrón se completa solo.'}</div>
       <div><label class="label" for="g-nombre">Nombre y apellido</label><input id="g-nombre" class="input" value="${esc(datos.nombre || '')}" required></div>
@@ -1003,15 +1033,69 @@ async function guardarGestionUI(form) {
     circuito: f.circuito || '', escuela: f.escuela || '', mesa: f.mesa || '',
     tipo, detalle: $('#g-detalle').value.trim().slice(0, 200),
     cantidad: Math.max(1, parseInt($('#g-cant').value, 10) || 1), monto: Math.max(0, Number($('#g-monto').value) || 0),
-    porId: por.uid, porNombre: por.nombre, path: por.path
+    porId: por.uid, porNombre: por.nombre, path: por.path, origen: ($('#g-origen')?.value || '').trim().slice(0, 120)
   };
+  if (!f.id) {
+    const enCamino = $('[data-act=g-f-estado][data-v=en_camino]')?.getAttribute('aria-pressed') === 'true';
+    g.estado = enCamino ? 'en_camino' : 'entregada';
+    if (enCamino) g.tiene = usuarioPorId($('#g-tiene').value) || st.me;
+  }
   const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Guardando…';
   try {
     await S.guardarGestion(g);
-    cerrarHoja(); toast(f.id ? 'Gestión actualizada' : `Gestión registrada: ${tipo} para ${primerNombre(nombre)}`);
+    cerrarHoja(); toast(f.id ? 'Gestión actualizada' : g.estado === 'en_camino' ? `Gestión registrada: ${tipo} para ${primerNombre(nombre)}, la tiene ${primerNombre(g.tiene.nombre)}` : `Gestión registrada: ${tipo} para ${primerNombre(nombre)}`);
     if (st.tab === 'gestiones' && g.mes !== st.gest.periodo && g.anio !== st.gest.periodo) { st.gest.periodo = g.mes; pintar(); }
   } catch (e) { err.textContent = mensajeError(e); btn.disabled = false; btn.textContent = 'Registrar gestión'; }
 }
+// Detalle de una gestión con su recorrido (de dónde salió, por qué manos pasó y cuándo llegó al vecino)
+const gestionPorId = (id) => st.gest.lista.find((y) => y.id === id) || st.gest.enMano.find((y) => y.id === id) || st.gPersona?.[id];
+const fechaHora = (t) => (t ? new Date(t).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '');
+function hojaVerGestion(x) {
+  const rec = x.recorrido || [];
+  const pasos = rec.length ? rec.map((p) => {
+    if (p.tipo === 'origen') {
+      const otro = p.a && p.a.uid !== p.por?.uid;
+      return { cls: !otro || p.recibido ? 'ok' : 'warn', t: `Se consiguió${p.origen ? ' · ' + esc(p.origen) : ''}`, d: `${esc(p.por?.nombre || '')} lo registró · ${fmtFecha(p.fecha)}${otro ? ` · quedó en manos de <b>${esc(p.a.nombre)}</b> · ${p.recibido ? `<b style="color:var(--ok)">recibida ✓</b> ${fechaHora(p.recibidoAt)}` : '<b style="color:var(--warn)">falta que confirme que la recibió</b>'}` : ''}` };
+    }
+    if (p.tipo === 'pase') return { cls: p.recibido ? 'ok' : 'warn', t: `${esc(p.de?.nombre || '')} se la pasó a ${esc(p.a?.nombre || '')}`, d: `${fechaHora(p.at)}${p.nota ? ' · ' + esc(p.nota) : ''} · ${p.recibido ? `<b style="color:var(--ok)">recibida ✓</b> ${fechaHora(p.recibidoAt)}` : '<b style="color:var(--warn)">falta que confirme que la recibió</b>'}` };
+    return { cls: 'fin', t: `Llegó al vecino: ${esc(x.nombre || '')}`, d: `Entregada por ${esc(p.por?.nombre || '')} · ${fmtFecha(p.fecha)}${p.recibio ? ` · la recibió ${esc(p.recibio)}` : ''}${p.nota ? ' · ' + esc(p.nota) : ''}` };
+  }) : [{ cls: 'fin', t: `Entregada a ${esc(x.nombre || '')}`, d: `${fmtFecha(x.fecha)} · registrada por ${esc(x.cargadoNombre || '')} (antes de que existiera el recorrido)` }];
+  if (estadoGestion(x) === 'en_camino') pasos.push({ cls: 'pend', t: `Falta que llegue a ${esc(x.nombre || '')}`, d: `Ahora la tiene <b>${esc(x.tieneNombre || '')}</b>` });
+  const enCamino = estadoGestion(x) === 'en_camino';
+  const ult = ultimoPaso(x);
+  const tengoYo = x.tieneId === st.me.uid;
+  const puedoMover = enCamino && (tengoYo || st.me.rol === 'cabeza' || (x.path || []).includes(st.me.uid) || (usuarioPorId(x.tieneId)?.path || []).includes(st.me.uid));
+  const destinos = [st.me, ...miEquipo()].filter((u) => u.rol !== 'fiscal' && u.uid !== x.tieneId);
+  abrirHoja(`
+    <div class="row"><div class="grow"><h2>${esc(x.tipo)}${x.cantidad > 1 ? ' ×' + x.cantidad : ''}</h2><div class="muted">para <b>${esc(x.nombre || '')}</b>${x.dni ? ' · DNI ' + fmtDni(x.dni) : ''}</div></div>
+      <button type="button" class="icon-btn" data-act="cerrar" aria-label="Cerrar">${ic('x')}</button></div>
+    <div class="tags" style="margin-top:-6px">${x.recorrido ? pillEstadoGestion(x) : '<span class="pill p-ok">Entregada</span>'}</div>
+    <div class="card pad small stack" style="gap:4px">
+      ${x.detalle ? `<div>${esc(x.detalle)}</div>` : ''}
+      ${x.domicilio ? `<div class="muted">${esc(x.domicilio)}</div>` : ''}
+      <div class="muted">Espacio de ${esc(x.porNombre || '')}${x.monto ? ' · ' + fmtPlata(x.monto) : ''}${x.circuito ? ' · Circ. ' + esc(x.circuito) : ''}</div>
+    </div>
+    <div><div class="label">Recorrido</div>
+      <ol class="recorrido">${pasos.map((p) => `<li class="rc-${p.cls}"><b>${p.t}</b><span>${p.d}</span></li>`).join('')}</ol></div>
+    ${enCamino && ult && ult.tipo !== 'entrega' && ult.a?.uid === st.me.uid && !ult.recibido ? `<button type="button" class="btn btn-full" data-act="g-recibi" data-id="${esc(x.id)}">${ic('ok', 18)} La recibí</button>` : ''}
+    ${puedoMover ? `
+      <details class="herr"><summary><span class="herr-ic">${ic('ok', 20)}</span><span class="grow"><b>Llegó al vecino</b><span class="muted small" style="display:block">Marcarla como entregada</span></span><span class="chev">▸</span></summary>
+        <div class="herr-body stack">
+          <div><label class="label" for="gv-fecha">Fecha de entrega</label><input id="gv-fecha" type="date" class="input" value="${hoyISOg()}"></div>
+          <div><label class="label" for="gv-recibio">¿Quién la recibió? <span class="muted">(si no fue ${esc(primerNombre(x.nombre || 'el titular'))})</span></label><input id="gv-recibio" class="input" placeholder="Ej: la hija, Marta"></div>
+          <div><label class="label" for="gv-nota-e">Nota <span class="muted">(opcional)</span></label><input id="gv-nota-e" class="input"></div>
+          <button type="button" class="btn" data-act="g-entregar" data-id="${esc(x.id)}">Confirmar entrega</button>
+        </div></details>
+      ${destinos.length ? `<details class="herr"><summary><span class="herr-ic">${ic('equipo', 20)}</span><span class="grow"><b>Pasársela a otro</b><span class="muted small" style="display:block">Queda registrado quién la tiene</span></span><span class="chev">▸</span></summary>
+        <div class="herr-body stack">
+          <div><label class="label" for="gv-a">A quién</label><select id="gv-a" class="input">${destinos.map((u) => `<option value="${u.uid}">${esc(u.nombre)} · ${ROL_CORTO[u.rol]}${u.uid === st.me.uid ? ' (yo)' : ''}</option>`).join('')}</select></div>
+          <div><label class="label" for="gv-nota">Nota <span class="muted">(opcional)</span></label><input id="gv-nota" class="input" placeholder="Ej: se la llevo el sábado"></div>
+          <button type="button" class="btn btn-sec" data-act="g-pasar" data-id="${esc(x.id)}">Registrar el pase</button>
+        </div></details>` : ''}` : ''}
+    <button type="button" class="btn btn-ghost" data-act="g-editar" data-id="${esc(x.id)}">Editar datos de la gestión</button>
+    <div class="muted small">Cargada por ${esc(x.cargadoNombre || '')}${x.at ? ' el ' + fechaHora(x.at) : ''}</div>`, { tipo: 'gestion' });
+}
+
 // En la ficha de la persona: lo que recibió
 async function pintarGestionesPersona(dni) {
   const el = $('#p-gest'); if (!el) return;
@@ -2415,7 +2499,31 @@ const acciones = {
   'eq-opciones': (el) => hojaQuitarUsuario(el.dataset.uid),
   'g-nueva': () => hojaGestion(),
   'g-nueva-p': () => hojaGestion(null, sheetCtx.dni),
-  'g-ver': (el) => { const x = st.gest.lista.find((y) => y.id === el.dataset.id) || st.gPersona?.[el.dataset.id]; if (x) hojaGestion(x); },
+  'g-ver': (el) => { const x = gestionPorId(el.dataset.id); if (x) hojaVerGestion(x); },
+  'g-editar': (el) => { const x = gestionPorId(el.dataset.id); if (x) hojaGestion(x); },
+  'g-estado': (el) => { st.gest.estado = el.dataset.v; document.querySelectorAll('[data-act=g-estado]').forEach((b) => b.setAttribute('aria-pressed', b === el)); pintarGestiones(); },
+  'g-f-estado': (el) => {
+    document.querySelectorAll('[data-act=g-f-estado]').forEach((b) => b.setAttribute('aria-pressed', b === el));
+    const camino = el.dataset.v === 'en_camino';
+    $('#g-tiene-box').hidden = !camino; $('#g-fecha-l').textContent = camino ? 'Fecha en que se consiguió' : 'Fecha de entrega';
+  },
+  'g-pasar': async (el) => {
+    const x = gestionPorId(el.dataset.id); const u = usuarioPorId($('#gv-a').value);
+    if (!x || !u) { toast('Elegí a quién se la pasás'); return; }
+    el.disabled = true;
+    try { await S.pasarGestion(x, u, $('#gv-nota').value.trim()); toast(`Listo: ahora la tiene ${primerNombre(u.nombre)}`); cerrarHoja(); }
+    catch (e) { el.disabled = false; toast(mensajeError(e)); }
+  },
+  'g-recibi': async (el) => {
+    const x = gestionPorId(el.dataset.id); if (!x) return; el.disabled = true;
+    try { await S.confirmarRecibido(x); toast('Confirmaste que la recibiste'); cerrarHoja(); } catch (e) { el.disabled = false; toast(mensajeError(e)); }
+  },
+  'g-entregar': async (el) => {
+    const x = gestionPorId(el.dataset.id); if (!x) return;
+    const fecha = $('#gv-fecha').value || hoyISOg(); el.disabled = true;
+    try { await S.entregarGestion(x, { fecha, recibio: $('#gv-recibio').value.trim(), nota: $('#gv-nota-e').value.trim() }); toast(`Entregada a ${primerNombre(x.nombre || '')}`); cerrarHoja(); }
+    catch (e) { el.disabled = false; toast(mensajeError(e)); }
+  },
   'g-borrar': async (el) => {
     if (el.dataset.confirmar !== '1') { el.dataset.confirmar = '1'; el.textContent = 'Tocá de nuevo para borrarla'; return; }
     try { await S.borrarGestion(el.dataset.id); cerrarHoja(); toast('Gestión borrada'); } catch (e) { toast(mensajeError(e)); }

@@ -505,8 +505,36 @@ export function guardarVideoObligatorio(v) {
 // ----- registro de gestiones (qué se le dio a quién, cuándo y a través de qué dirigente)
 export function watchGestiones(filtro, cb, alError) {
   const ws = [where(filtro.campo, '==', filtro.valor)];
-  if (me.rol !== 'cabeza') ws.unshift(where('path', 'array-contains', me.uid));
-  return onSnapshot(query(C('gestiones'), ...ws), (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => { console.error(e); alError?.(e); });
+  const err = (e) => { console.error(e); alError?.(e); };
+  if (me.rol === 'cabeza') return onSnapshot(query(C('gestiones'), ...ws), (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), err);
+  // las de mi espacio + las que pasaron por mis manos (o las de mi equipo) en su recorrido
+  let a = []; let b = [];
+  const emitir = () => { const m = new Map(); for (const x of [...b, ...a]) m.set(x.id, x); cb([...m.values()]); };
+  const u1 = onSnapshot(query(C('gestiones'), where('path', 'array-contains', me.uid), ...ws), (s) => { a = s.docs.map((d) => ({ id: d.id, ...d.data() })); emitir(); }, err);
+  const u2 = onSnapshot(query(C('gestiones'), where('pathsRecorrido', 'array-contains', me.uid), ...ws), (s) => { b = s.docs.map((d) => ({ id: d.id, ...d.data() })); emitir(); }, err);
+  return () => { u1(); u2(); };
+}
+// Gestiones que tengo en mano para entregar (de cualquier fecha)
+export function watchGestionesEnMano(cb) {
+  // (pathsRecorrido incluye al que la tiene: así las reglas pueden comprobar que puede verla)
+  return onSnapshot(query(C('gestiones'), where('pathsRecorrido', 'array-contains', me.uid), where('tieneId', '==', me.uid), where('estado', '==', 'en_camino')),
+    (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => { console.error(e); cb([]); });
+}
+// ----- Recorrido de una gestión: de dónde salió, por qué manos pasó y cuándo llegó al vecino
+const quien = (u) => ({ uid: u.uid, nombre: u.nombre });
+// Si la tenía yo y no había confirmado que la recibí, al pasarla o entregarla queda confirmado
+const conMiRecibo = (g) => (g.recorrido || []).map((p, i, xs) => (i === xs.length - 1 && p.tipo !== 'entrega' && p.a?.uid === me.uid && !p.recibido ? { ...p, recibido: true, recibidoAt: Date.now() } : p));
+export function pasarGestion(g, u, nota = '') {
+  const paso = { tipo: 'pase', at: Date.now(), de: quien(me), a: quien(u), nota: String(nota).slice(0, 200), recibido: u.uid === me.uid };
+  return sinTrabar(updateDoc(D('gestiones', g.id), { recorrido: [...conMiRecibo(g), paso], tieneId: u.uid, tieneNombre: u.nombre, pathsRecorrido: arrayUnion(...u.path), actualizadoAt: serverTimestamp() }));
+}
+export function confirmarRecibido(g) {
+  const rec = (g.recorrido || []).map((p, i, xs) => (i === xs.length - 1 && p.tipo !== 'entrega' && p.a?.uid === me.uid ? { ...p, recibido: true, recibidoAt: Date.now() } : p));
+  return sinTrabar(updateDoc(D('gestiones', g.id), { recorrido: rec, actualizadoAt: serverTimestamp() }));
+}
+export function entregarGestion(g, { fecha, recibio = '', nota = '' }) {
+  const paso = { tipo: 'entrega', at: Date.now(), fecha, por: quien(me), recibio: String(recibio).slice(0, 120), nota: String(nota).slice(0, 200) };
+  return sinTrabar(updateDoc(D('gestiones', g.id), { recorrido: [...conMiRecibo(g), paso], estado: 'entregada', fechaEntrega: fecha, tieneId: deleteField(), tieneNombre: deleteField(), actualizadoAt: serverTimestamp() }));
 }
 export async function gestionesDePersona(dni) {
   const ws = [where('dni', '==', dni)];
@@ -516,9 +544,21 @@ export async function gestionesDePersona(dni) {
 }
 export async function guardarGestion(g) {
   const { id, ...datos } = g;
-  if (id) { await sinTrabar(updateDoc(D('gestiones', id), { ...datos, editadoAt: serverTimestamp() })); return id; }
+  if (id) { delete datos.tiene; delete datos.estado; await sinTrabar(updateDoc(D('gestiones', id), { ...datos, editadoAt: serverTimestamp() })); return id; }
   const ref = doc(C('gestiones'));
-  await sinTrabar(setDoc(ref, { ...datos, cargadoPor: me.uid, cargadoNombre: me.nombre, at: Date.now(), creado: serverTimestamp() }));
+  const extra = {};
+  if (datos.estado === 'en_camino' && datos.tiene) {
+    // queda en manos de alguien: arranca el recorrido
+    const t = datos.tiene; delete datos.tiene;
+    Object.assign(extra, { tieneId: t.uid, tieneNombre: t.nombre, pathsRecorrido: t.path,
+      recorrido: [{ tipo: 'origen', at: Date.now(), fecha: datos.fecha, por: quien(me), origen: datos.origen || '', a: quien(t), recibido: t.uid === me.uid }] });
+  } else if (!id) {
+    delete datos.tiene;
+    Object.assign(extra, { estado: 'entregada', fechaEntrega: datos.fecha, recorrido: [
+      ...(datos.origen ? [{ tipo: 'origen', at: Date.now(), fecha: datos.fecha, por: quien(me), origen: datos.origen, a: quien(me), recibido: true }] : []),
+      { tipo: 'entrega', at: Date.now(), fecha: datos.fecha, por: quien(me), recibio: '' }] });
+  }
+  await sinTrabar(setDoc(ref, { ...datos, ...extra, cargadoPor: me.uid, cargadoNombre: me.nombre, at: Date.now(), creado: serverTimestamp() }));
   return ref.id;
 }
 export function borrarGestion(id) { return sinTrabar(deleteDoc(D('gestiones', id))); }
